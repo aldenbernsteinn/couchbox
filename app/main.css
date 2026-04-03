@@ -1,0 +1,720 @@
+body {
+    background-color: #000;
+    overflow: hidden;
+
+    cursor: none !important;
+}
+
+:root {
+    --theme-color: #14b413;
+}
+
+* {
+    font-family: 'Segoe UI Variable', 'Segoe UI Variable Static Text', 'Segoe UI', sans-serif;
+    margin: 0;
+    color: white;
+}
+
+.wallpaper {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    object-fit: cover;
+    z-index: 0;
+    opacity: 0;
+    transition: opacity 0.5s ease;
+    pointer-events: none;
+}
+
+.game-logo {
+    position: absolute;
+    top: 100px;
+    left: 116px;
+    max-width: 350px;
+    max-height: 120px;
+    z-index: 50;
+    display: none;
+    filter: drop-shadow(0 2px 10px rgba(0,0,0,0.9));
+    transition: opacity 0.3s;
+}
+
+#dashboard {
+    top: 0;
+    left: 0;
+    position: absolute;
+    width: 100vw;
+    height: 100vh;
+    background: linear-gradient(0deg, rgba(0,0,0,0.4) 50%, rgba(0,0,0,0.7) 100%);
+    z-index: 99;
+    overflow: hidden;
+    display: none;
+
+    opacity: 0%;
+    animation-name: fadeIn;
+    animation-duration: 0.5s;
+    animation-delay: 0s;
+    animation-fill-mode: forwards;
+
+    aspect-ratio: 16 / 9 !important;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0%;
+    }
+    to {
+        opacity: 100%;
+    }
+}
+
+#profile {
+    position: absolute;
+    left: 116px;
+    top: 67px;
+    display: flex;
+    align-items: center;
+
+    opacity: 0%;
+    animation-name: fadeIn;
+    animation-duration: 0.3s;
+    animation-delay: 0.6s;
+    animation-fill-mode: forwards;
+}
+
+#profilepic {
+    border-radius: 300px;
+    width: 56px;
+    height: 56px;
+}
+
+#profile div {
+    margin-left: 16px;
+
+    opacity: 0%;
+    animation-name: fadeIn;
+    animation-duration: 0.3s;
+    animation-delay: 0.7s;
+    animation-fill-mode: forwards;
+}
+
+#profile div h3 {
+    font-style: normal;
+    font-weight: 500;
+    font-size: 24px;
+    line-height: 33px;
+    display: flex;
+    align-items: center;
+    letter-spacing: 0.015em;
+
+    color: #FFFFFF;
+    margin-top: -1px;
+}
+
+#profile div p {
+    font-style: normal;
+    font-weight: normal;
+    font-size: 20px;
+    line-height: 31px;
+    /* identical to box height */
+
+    display: flex;
+    align-items: flex-end;
+    letter-spacing: 0.015em;
+
+    color: #FFFFFF99;
+
+    margin-top: -5px;
+}
+
+#time {
+    font-family: "Bahnschrift";
+    font-style: normal;
+    font-weight: normal;
+    font-size: 24px;
+    line-height: 33px;
+    display: flex;
+    align-items: center;
+    text-align: right;
+    letter-spacing: 0.015em;
+
+    color: #FFFFFF;
+
+    position: absolute;
+    top: 71px;
+    right: 105px;
+}
+
+#gamelist {
+    margin-top: 220px;
+    margin-left: 104px;
+    display: flex;
+    align-items: flex-end;
+    height: 400px;
+
+    opacity: 0%;
+    animation-name: fadeIn;
+    animation-duration: 0.5s;
+    animation-delay: 0.5s;
+    animation-fill-mode: forwards;
+}
+
+.game {
+    width: 200px;
+    height: 200px;
+    border-radius: 5px;
+    margin-left: 16px;
+    background-color: #00000099;
+    transition: transform 0.3s;
+    background-size: cover;
+    background-position: center;
+
+    backdrop-filter: blur(24px) !important;
+}
+
+.latest {
+    width: 380px;
+    height: 380px;
+    margin-left: 0px;
+    margin-right: calc(52px - 16px);
+}
+
+.selected {
+    outline: 3px solid var(--theme-color);
+    box-shadow: 0px 5px 10px var(--theme-color);
+}
+
+#startup {
+    z-index: 999999999;
+    object-fit: cover;
+    width: 100vw;
+    height: 100vh;
+    position: absolute;
+    top: 0;
+    left: 0;
+}
+
+@keyframes new-notification {
+    0% {
+        bottom: 0px;
+    }
+    100% {
+        bottom: 30px;
+    }
+}
+
+@keyframes new-notification-end {
+    0% {
+        bottom: 30px;
+        opacity: 100%;
+    }
+    99% {
+        bottom: 0px;
+        opacity: 100%;
+    }
+    100% {
+        opacity: 0%;
+    }
+}
+
+.new-notification {
+    position: fixed;
+    left: 40%;
+    transform: translate(0, -40%);
+    bottom: 30px;
+
+    width: 360px;
+
+    background-color: #303030;
+    padding: 10px;
+    border-radius: 8px;
+    display: flex;
+
+    align-items: center;
+
+    animation: new-notification 0.5s 0s forwards cubic-bezier(0,0,0,1), new-notification-end 0.5s 4s forwards cubic-bezier(0,0,1,0);
+}
+
+.not_img {
+    height: 50px;
+    width: 50px;
+    object-fit: cover;
+    border-radius: 5px;
+}
+
+@keyframes not_sub {
+    0% {
+        transform: translate(0px, 30px);
+        opacity: 0%;
+    }
+    100% {
+        transform: translate(0px, 0px);
+        opacity: 100%;
+    }
+}
+
+.not_txt {
+    color: #fff;
+    font-size: 18px;
+    margin-left: 15px;
+    margin-right: 10px;
+
+    opacity: 0%;
+    animation: not_sub;
+    animation-duration: 0.5s;
+    animation-timing-function: cubic-bezier(0,0,0,1);
+    animation-fill-mode: forwards;
+    animation-delay: 0.5s;
+}
+
+@keyframes log {
+    0% {
+        transform: scale(0);
+    }
+    100% {
+        transform: scale(1);
+    }
+}
+
+@keyframes log-end {
+    0% {
+        transform: scale(1);
+    }
+    100% {
+        transform: scale(0);
+    }
+}
+
+.login {
+    position: fixed;
+    left: 40%;
+    transform: translate(0, -40%);
+    bottom: 50px;
+    width: 360px;
+
+    background-color: var(--theme-color);
+    padding: 10px;
+    border-radius: 8px;
+    display: flex;
+
+    align-items: center;
+    overflow: hidden;
+    animation: log 0.6s 0s forwards cubic-bezier(.57,-0.01,0,1.01), log-end 0.3s 4s forwards cubic-bezier(0,0,1,0);
+}
+
+@keyframes log_img {
+    0% {
+        margin-left: -60px;
+    }
+    100% {
+        margin-left: 0px;
+    }
+}
+
+.log_img {
+    height: 50px;
+    width: 50px;
+    object-fit: cover;
+    border-radius: 300px;
+    margin-left: -60px;
+
+    animation: log_img;
+    animation-duration: 0.5s;
+    animation-timing-function: cubic-bezier(0,0,0,1);
+    animation-fill-mode: forwards;
+    animation-delay: 1.5s;
+}
+
+.log_txt {
+    color: #fff;
+    font-size: 24px;
+    font-weight: 400;
+    margin-left: 15px;
+    margin-right: 10px;
+}
+
+#fps {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 999999999999999999999999999999999;
+    padding: 10px;
+    background-color: #00000099;
+    border-radius: 5px;
+    font-family: "Consolas";
+    display: none;
+}
+
+/* ===== Patatin additions ===== */
+
+#jumpbackin {
+    position: absolute;
+    left: 116px;
+    top: 190px;
+    font-size: 20px;
+    font-weight: 600;
+    color: #fff;
+
+    opacity: 0%;
+    animation-name: fadeIn;
+    animation-duration: 0.3s;
+    animation-delay: 0.5s;
+    animation-fill-mode: forwards;
+}
+
+/* Utility row — matches Xbox bottom tiles exactly */
+#utilityrow {
+    position: absolute;
+    left: 116px;
+    bottom: 100px;
+    display: flex;
+    gap: 12px;
+    align-items: stretch;
+
+    opacity: 0%;
+    animation-name: fadeIn;
+    animation-duration: 0.5s;
+    animation-delay: 0.7s;
+    animation-fill-mode: forwards;
+}
+
+.utile {
+    height: 100px;
+    width: 160px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 0 20px;
+    transition: transform 0.3s;
+    cursor: default;
+    position: relative;
+    overflow: hidden;
+}
+
+.utile.wide {
+    width: 260px;
+}
+
+.utile.featured {
+    width: 300px;
+    padding: 0;
+}
+
+.utile.green {
+    background: linear-gradient(145deg, #2d7d2d, #1a5c1a);
+}
+
+.utile.dark {
+    background: #202020;
+}
+
+.utile.selected {
+    outline: 3px solid var(--theme-color);
+    box-shadow: 0px 5px 10px var(--theme-color);
+}
+
+.utile-svg {
+    width: 28px;
+    height: 28px;
+    flex-shrink: 0;
+    opacity: 0.9;
+}
+
+.utile-label {
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.35;
+    color: white;
+}
+
+/* Featured tile (like "Trending: Forza Horizon 5" on Xbox) */
+.utile-featured-bg {
+    position: absolute;
+    inset: 0;
+    background-size: cover;
+    background-position: center;
+    opacity: 0.5;
+}
+
+.utile-featured-content {
+    position: relative;
+    z-index: 1;
+    padding: 16px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.utile-tag {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--theme-color);
+}
+
+.utile.featured {
+    background: #1a1a2e;
+}
+
+/* Button hints */
+#buttonhints {
+    position: absolute;
+    bottom: 30px;
+    right: 105px;
+    display: flex;
+    gap: 28px;
+
+    opacity: 0%;
+    animation-name: fadeIn;
+    animation-duration: 0.3s;
+    animation-delay: 0.8s;
+    animation-fill-mode: forwards;
+}
+
+.hint {
+    font-size: 14px;
+    color: #ffffff80;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.hint-icon {
+    width: 18px;
+    height: 18px;
+    opacity: 0.6;
+}
+
+.btn-y {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: #ca8a04;
+    font-size: 11px;
+    font-weight: 700;
+    color: white;
+}
+
+/* Platform badge on game tiles */
+.platform-badge {
+    position: absolute;
+    bottom: 8px;
+    right: 8px;
+    background: rgba(0, 0, 0, 0.75);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: white;
+}
+
+.game {
+    position: relative;
+}
+
+/* ===== GAME CONTEXT MENU (Start button) ===== */
+#context-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 99998;
+    background: rgba(0, 0, 0, 0.8);
+    display: none;
+    align-items: center;
+    justify-content: center;
+}
+
+.context-box {
+    background: #1e1e1e;
+    border-radius: 12px;
+    padding: 30px 40px;
+    min-width: 350px;
+}
+
+.context-box h3 {
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 20px;
+    color: white;
+}
+
+.context-option {
+    padding: 12px 18px;
+    border-radius: 6px;
+    font-size: 15px;
+    font-weight: 500;
+    margin-bottom: 6px;
+    color: #aaa;
+    border: 2px solid transparent;
+    transition: all 0.15s;
+}
+
+.context-option.selected {
+    border-color: var(--theme-color);
+    box-shadow: 0 0 0 2px var(--theme-color), 0 4px 12px rgba(20, 180, 19, 0.3);
+    color: white;
+    background: rgba(20, 180, 19, 0.1);
+}
+
+/* ===== SHUTDOWN OVERLAY ===== */
+#shutdown-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 99999;
+    background: rgba(0, 0, 0, 0.85);
+    display: none;
+    align-items: center;
+    justify-content: center;
+}
+
+.shutdown-box {
+    background: #1e1e1e;
+    border-radius: 12px;
+    padding: 40px 50px;
+    min-width: 400px;
+}
+
+.shutdown-box h2 {
+    font-size: 22px;
+    font-weight: 600;
+    margin-bottom: 24px;
+    color: white;
+}
+
+.shutdown-option {
+    padding: 14px 20px;
+    border-radius: 6px;
+    font-size: 16px;
+    font-weight: 500;
+    margin-bottom: 8px;
+    color: #ccc;
+    border: 2px solid transparent;
+    transition: all 0.15s;
+}
+
+.shutdown-option.selected {
+    border-color: var(--theme-color);
+    box-shadow: 0 0 0 2px var(--theme-color), 0 4px 12px rgba(20, 180, 19, 0.3);
+    color: white;
+    background: rgba(20, 180, 19, 0.1);
+}
+
+/* ===== MY GAMES OVERLAY ===== */
+#mygames-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    background: rgba(0, 0, 0, 0.95);
+    padding: 60px 80px;
+    overflow-y: auto;
+}
+
+#mygames-header {
+    display: flex;
+    align-items: center;
+    gap: 40px;
+    margin-bottom: 30px;
+}
+
+#mygames-header h2 {
+    font-size: 24px;
+    font-weight: 600;
+}
+
+#mygames-tabs {
+    display: flex;
+    gap: 20px;
+}
+
+.mg-tab {
+    font-size: 16px;
+    color: #888;
+    padding: 6px 16px;
+    border-radius: 4px;
+    cursor: default;
+}
+
+.mg-tab.active {
+    color: white;
+    background: rgba(255,255,255,0.1);
+}
+
+#mygames-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.mg-tile {
+    width: 150px;
+    height: 200px;
+    border-radius: 8px;
+    background: #1e1e1e;
+    background-size: cover;
+    background-position: center;
+    position: relative;
+    overflow: hidden;
+    border: 2px solid transparent;
+    transition: all 0.15s;
+}
+
+.mg-tile.selected {
+    border-color: var(--theme-color);
+    box-shadow: 0 0 0 2px var(--theme-color), 0 4px 12px rgba(20, 180, 19, 0.3);
+}
+
+.mg-name {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 8px;
+    font-size: 11px;
+    font-weight: 600;
+    background: linear-gradient(transparent, rgba(0,0,0,0.9));
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Non-installed game tiles */
+.mg-tile.not-installed {
+    opacity: 0.7;
+    filter: brightness(0.7);
+}
+
+.mg-tile.not-installed.selected {
+    opacity: 1;
+    filter: brightness(1);
+}
+
+.install-badge {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    background: var(--theme-color);
+    padding: 3px 10px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: white;
+}
+
+.price-badge {
+    position: absolute;
+    bottom: 30px;
+    left: 8px;
+    background: rgba(0,0,0,0.8);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    color: white;
+}
