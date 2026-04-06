@@ -1,4 +1,4 @@
-// Patatin — based on xbox-ui-windows by ecnivtwelve
+// Patatin — Linux port
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
@@ -12,8 +12,25 @@ const xboxDir = path.join(documents, 'Xbox');
 const assetsDir = path.join(xboxDir, 'Assets');
 [xboxDir, assetsDir].forEach(d => { try { fs.mkdirSync(d, { recursive: true }); } catch {} });
 
-const STEAM_ROOT = ['C:\\Program Files (x86)\\Steam', 'C:\\Program Files\\Steam'].find(p => fs.existsSync(path.join(p, 'steam.exe'))) || '';
-const STEAM_CACHE = path.join(STEAM_ROOT, 'appcache', 'librarycache');
+// Windows SSD mounted read-only
+const WINDOWS_MNT = ['/mnt/windows', '/media/' + os.userInfo().username + '/WINDOWS'].find(p => fs.existsSync(p)) || '';
+const STEAM_PATHS = [
+  path.join(WINDOWS_MNT, 'Program Files (x86)', 'Steam'),
+  path.join(WINDOWS_MNT, 'Program Files', 'Steam'),
+].filter(p => fs.existsSync(p));
+const STEAM_ROOT = STEAM_PATHS[0] || '';
+
+// Games that won't work on Linux (kernel-level anti-cheat)
+const WINDOWS_ONLY = new Set(['Call of Duty HQ', 'Call of Duty', 'Battlefield 6']);
+const ONLINE_BLOCKED = new Set(['Rocket League', 'rocketleague']);
+const HIDDEN_APPS = new Set([
+  'Wallpaper Engine', 'wallpaper_engine', 'Steamworks Common Redistributables',
+  'Steam Controller Configs', 'Steamworks Shared', 'Proton Experimental',
+  'Proton EasyAntiCheat Runtime', 'Proton BattlEye Runtime',
+  'Steam Linux Runtime', 'Steam Linux Runtime - Soldier', 'Steam Linux Runtime - Sniper',
+  'LEGO® Star Wars™: The Skywalker Saga', 'LEGO Star Wars - The Skywalker Saga',
+  'Oblivion Remastered',
+]);
 
 // ===== Profile =====
 const gamertagFile = path.join(assetsDir, 'gamertag.txt');
@@ -22,8 +39,8 @@ const colorFile = path.join(assetsDir, 'gamercolor.txt');
 const wallpaperFile = path.join(assetsDir, 'video.mp4');
 const profilepicFile = path.join(assetsDir, 'gamerpic.png');
 
-if (!fs.existsSync(gamertagFile)) fs.writeFileSync(gamertagFile, 'Patatin');
-if (!fs.existsSync(descFile)) fs.writeFileSync(descFile, os.userInfo().username);
+if (!fs.existsSync(gamertagFile)) fs.writeFileSync(gamertagFile, os.userInfo().username);
+if (!fs.existsSync(descFile)) fs.writeFileSync(descFile, 'Linux Gaming');
 if (!fs.existsSync(colorFile)) fs.writeFileSync(colorFile, '#14b413');
 
 const gamertag_full = fs.readFileSync(gamertagFile, 'utf8').trim();
@@ -39,7 +56,8 @@ if (fs.existsSync(profilepicFile)) {
   document.getElementById('profilepic').style.cssText = 'width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,#2d8c2d,#1a5c1a);';
 }
 
-// ===== INSTANT BOOT (no startup video) =====
+// ===== INSTANT BOOT =====
+let hasMovedOnce = false;
 $('#dashboard').css('display', 'block');
 setTimeout(() => {
   new Audio('assets/login.mp3').play().catch(() => {});
@@ -55,10 +73,46 @@ setInterval(() => {
     new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }, 1000);
 
+// ===== AUTO-NORMALIZE MUSIC =====
+(function normalizeMusic() {
+  let ffmpegPath;
+  try { ffmpegPath = require('ffmpeg-static'); } catch { return; }
+  const cacheDir = path.join(__dirname, '..', 'cache', 'music');
+  if (!fs.existsSync(cacheDir)) return;
+
+  function findMp3s(dir) {
+    let results = [];
+    try {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) results = results.concat(findMp3s(full));
+        else if (entry.name.endsWith('.mp3')) results.push(full);
+      }
+    } catch {}
+    return results;
+  }
+
+  const mp3s = findMp3s(cacheDir);
+  mp3s.forEach(f => {
+    const flag = f + '.normalized';
+    if (fs.existsSync(flag)) return;
+    const tmp = f + '.tmp.mp3';
+    try {
+      cp.execSync('"' + ffmpegPath + '" -y -i "' + f + '" -af loudnorm=I=-16:TP=-1.5:LRA=11 -q:a 2 "' + tmp + '"',
+        { shell: true, stdio: 'pipe' });
+      fs.unlinkSync(f);
+      fs.renameSync(tmp, f);
+      fs.writeFileSync(flag, 'done');
+    } catch {
+      try { fs.unlinkSync(tmp); } catch {}
+    }
+  });
+})();
+
 // ===== EA ART LOOKUP =====
 const EA_ART = {
   'Plants vs Zombies Garden Warfare 2': {
-    tile: 'C:/Program Files/EA Games/Plants vs Zombies Garden Warfare 2/EAAntiCheat.splash.png',
+    tile: 'https://cdn.cloudflare.steamstatic.com/steam/apps/590390/header.jpg',
     hero: 'https://media.contentapi.ea.com/content/dam/gin/images/2016/01/pvzgw2-plantsvszombiesgardenwarfare2-background-key-art.jpg',
   },
 };
@@ -75,54 +129,64 @@ function parseVDF(content) {
 
 function detectSteamGames() {
   const games = [];
-  if (!STEAM_ROOT) return games;
+  if (!WINDOWS_MNT) return games;
 
-  const libraryFolders = [path.join(STEAM_ROOT, 'steamapps')];
-  const libVdf = path.join(STEAM_ROOT, 'steamapps', 'libraryfolders.vdf');
-  if (fs.existsSync(libVdf)) {
-    for (const m of fs.readFileSync(libVdf, 'utf8').matchAll(/"path"\s+"([^"]+)"/g)) {
-      const appsDir = path.join(m[1].replace(/\\\\/g, '\\'), 'steamapps');
-      if (fs.existsSync(appsDir) && !libraryFolders.includes(appsDir)) libraryFolders.push(appsDir);
+  // Find all Steam library folders on the Windows SSD
+  const libraryFolders = [];
+  for (const steamPath of STEAM_PATHS) {
+    const appsDir = path.join(steamPath, 'steamapps');
+    if (fs.existsSync(appsDir)) libraryFolders.push(appsDir);
+
+    const libVdf = path.join(appsDir, 'libraryfolders.vdf');
+    if (fs.existsSync(libVdf)) {
+      for (const m of fs.readFileSync(libVdf, 'utf8').matchAll(/"path"\s+"([^"]+)"/g)) {
+        // These are Windows paths — try to map them to the mount
+        const winPath = m[1].replace(/\\\\/g, '\\');
+        // Check if it's on the same drive (e.g., backup SteamLibrary)
+        const possiblePaths = [
+          path.join(WINDOWS_MNT, 'Users', 'Alden Bernstein', 'Cross-Plat-Games', 'SteamLibrary', 'steamapps'),
+        ];
+        for (const pp of possiblePaths) {
+          if (fs.existsSync(pp) && !libraryFolders.includes(pp)) libraryFolders.push(pp);
+        }
+      }
     }
   }
+
+  // Also directly check backup SteamLibrary
+  const backupSteam = path.join(WINDOWS_MNT, 'Users', 'Alden Bernstein', 'Cross-Plat-Games', 'SteamLibrary', 'steamapps');
+  if (fs.existsSync(backupSteam) && !libraryFolders.includes(backupSteam)) {
+    libraryFolders.push(backupSteam);
+  }
+
+  const seenAppIds = new Set();
 
   for (const appsDir of libraryFolders) {
     let files; try { files = fs.readdirSync(appsDir); } catch { continue; }
     for (const file of files) {
       if (!file.startsWith('appmanifest_') || !file.endsWith('.acf')) continue;
       const appId = file.replace('appmanifest_', '').replace('.acf', '');
+      if (seenAppIds.has(appId)) continue;
+      seenAppIds.add(appId);
+
       const manifest = parseVDF(fs.readFileSync(path.join(appsDir, file), 'utf8'));
-      if (!manifest.name || manifest.name === 'Steamworks Common Redistributables') continue;
-      // Only fully installed games (StateFlags 4)
+      if (!manifest.name) continue;
+      if (HIDDEN_APPS.has(manifest.name)) continue;
       if (manifest.StateFlags && manifest.StateFlags !== '4') continue;
-      // Deduplicate by appId
-      if (games.some(g => g.appId === appId)) continue;
 
-      const localCache = path.join(STEAM_CACHE, appId);
-      const localTile = path.join(localCache, 'library_600x900.jpg');
-      const localHeroBlur = path.join(localCache, 'library_hero_blur.jpg');
-      const localHero = path.join(localCache, 'library_hero.jpg');
-      const localLogo = path.join(localCache, 'logo.png');
-
-      // Find the actual game exe to launch directly (bypasses Big Picture)
-      const installDir = manifest.installdir;
-      const gamePath = path.join(appsDir, 'common', installDir);
-      let gameExe = null;
-      try {
-        const exes = fs.readdirSync(gamePath).filter(f =>
-          f.endsWith('.exe') && !/unins|crash|report|redist|setup|launch|anticheat|vc_redist/i.test(f)
-        );
-        if (exes.length > 0) gameExe = path.join(gamePath, exes[0]);
-      } catch {}
+      let compatibility = 'proton';
+      if (WINDOWS_ONLY.has(manifest.name)) compatibility = 'windows-only';
+      else if (ONLINE_BLOCKED.has(manifest.name)) compatibility = 'online-blocked';
 
       games.push({
         name: manifest.name, appId, platform: 'steam', installed: true,
-        art: fs.existsSync(localTile) ? localTile : `https://cdn.cloudflare.steamstatic.com/steam/apps/${appId}/library_600x900.jpg`,
-        heroBlur: fs.existsSync(localHeroBlur) ? localHeroBlur : `https://cdn.cloudflare.steamstatic.com/steam/apps/${appId}/library_hero_blur.jpg`,
-        hero: fs.existsSync(localHero) ? localHero : `https://cdn.cloudflare.steamstatic.com/steam/apps/${appId}/library_hero.jpg`,
-        logo: fs.existsSync(localLogo) ? localLogo : `https://cdn.cloudflare.steamstatic.com/steam/apps/${appId}/logo.png`,
-        launch: gameExe ? gameExe : `steam://rungameid/${appId}`,
-        exe: gameExe,
+        compatibility,
+        art: `https://cdn.cloudflare.steamstatic.com/steam/apps/${appId}/library_600x900.jpg`,
+        heroBlur: `https://cdn.cloudflare.steamstatic.com/steam/apps/${appId}/library_hero_blur.jpg`,
+        hero: `https://cdn.cloudflare.steamstatic.com/steam/apps/${appId}/library_hero.jpg`,
+        logo: `https://cdn.cloudflare.steamstatic.com/steam/apps/${appId}/logo.png`,
+        launch: `steam://rungameid/${appId}`,
+        exe: null,
       });
     }
   }
@@ -131,16 +195,17 @@ function detectSteamGames() {
 
 function detectEAGames() {
   const games = [];
-  const eaPaths = ['C:\\Program Files\\EA Games', 'C:\\Program Files (x86)\\EA Games'];
+  const eaPaths = [
+    path.join(WINDOWS_MNT, 'Program Files', 'EA Games'),
+    path.join(WINDOWS_MNT, 'Program Files (x86)', 'EA Games'),
+  ];
   for (const eaRoot of eaPaths) {
     if (!fs.existsSync(eaRoot)) continue;
     for (const dir of fs.readdirSync(eaRoot, { withFileTypes: true })) {
       if (!dir.isDirectory()) continue;
       const gamePath = path.join(eaRoot, dir.name);
       const eaArt = EA_ART[dir.name] || {};
-      const splash = path.join(gamePath, 'EAAntiCheat.splash.png');
 
-      // Find the EA game launcher exe
       let eaExe = null;
       try {
         const exes = fs.readdirSync(gamePath).filter(f =>
@@ -151,8 +216,9 @@ function detectEAGames() {
 
       games.push({
         name: dir.name, platform: 'ea', installed: true,
-        art: eaArt.tile || (fs.existsSync(splash) ? splash : null),
-        heroBlur: eaArt.hero || null,
+        compatibility: 'proton',
+        art: eaArt.tile || null,
+        heroBlur: null,
         hero: eaArt.hero || null,
         logo: null,
         launch: eaExe,
@@ -163,25 +229,92 @@ function detectEAGames() {
   return games;
 }
 
-// ===== POPULATE =====
-const allGames = [...detectSteamGames(), ...detectEAGames()];
+function detectBackupGames() {
+  const games = [];
+  const gamesDir = path.join(WINDOWS_MNT, 'Users', 'Alden Bernstein', 'Cross-Plat-Games', 'Games');
+  if (!fs.existsSync(gamesDir)) return games;
 
-// No mock data — show real installed games only
+  try {
+    for (const dir of fs.readdirSync(gamesDir, { withFileTypes: true })) {
+      if (!dir.isDirectory()) continue;
+      const gamePath = path.join(gamesDir, dir.name);
+      const gameName = dir.name;
+
+      let compatibility = 'proton';
+      if (ONLINE_BLOCKED.has(gameName) || gameName.toLowerCase().includes('rocketleague')) {
+        compatibility = 'online-blocked';
+      }
+
+      let mainExe = null;
+      try {
+        const files = fs.readdirSync(gamePath);
+        for (const f of files) {
+          if (f.endsWith('.exe') && !/unins|anticheat|crash|launcher\.exe/i.test(f)) {
+            mainExe = path.join(gamePath, f);
+            break;
+          }
+        }
+      } catch {}
+
+      // Try to find art from known sources
+      let art = null;
+      let hero = null;
+      if (gameName.includes('Hogwarts')) {
+        art = 'https://cdn.cloudflare.steamstatic.com/steam/apps/990080/library_600x900.jpg';
+        hero = 'https://cdn.cloudflare.steamstatic.com/steam/apps/990080/library_hero.jpg';
+      } else if (gameName.toLowerCase().includes('rocket')) {
+        art = 'https://cdn.cloudflare.steamstatic.com/steam/apps/252950/library_600x900.jpg';
+        hero = 'https://cdn.cloudflare.steamstatic.com/steam/apps/252950/library_hero.jpg';
+      }
+
+      games.push({
+        name: gameName, platform: 'backup', installed: true,
+        compatibility,
+        art, hero, heroBlur: hero, logo: null,
+        launch: mainExe,
+        exe: mainExe,
+      });
+    }
+  } catch {}
+  return games;
+}
+
+// ===== POPULATE =====
+const allGamesRaw = [...detectSteamGames(), ...detectEAGames(), ...detectBackupGames()];
+// Deduplicate by name (keep first occurrence which has better data)
+const seenNames = new Set();
+const allGames = allGamesRaw.filter(g => {
+  const key = g.name.toLowerCase().replace(/\s+/g, '');
+  if (seenNames.has(key)) return false;
+  seenNames.add(key);
+  return true;
+});
 
 const $gamelist = $('#gamelist');
 $gamelist.empty();
-allGames.slice(0, 8).forEach((game, i) => {
+allGames.slice(0, 12).forEach((game, i) => {
   const classes = i === 0 ? 'game latest' : 'game';
   const $tile = $(`<div class="${classes}" id="game-${i}"></div>`);
   if (game.art) {
-    $tile.css('background-image', `url('${game.art.replace(/\\/g, '/')}')`);
+    $tile.css('background-image', `url('${(game.art + '').replace(/\\/g, '/')}')`);
   } else {
     const hue = (i * 47) % 360;
     $tile.css('background', `linear-gradient(135deg, hsl(${hue},40%,25%), hsl(${hue+60},30%,15%))`);
     $tile.html(`<span style="display:flex;align-items:center;justify-content:center;width:100%;height:100%;font-size:14px;font-weight:600;padding:12px;text-align:center">${game.name}</span>`);
   }
-  const badge = game.platform === 'steam' ? 'STEAM' : game.platform === 'ea' ? 'EA' : '';
+
+  // Platform badge
+  const badge = game.platform === 'steam' ? 'STEAM' : game.platform === 'ea' ? 'EA' : game.platform === 'backup' ? 'LIBRARY' : '';
   if (badge) $tile.append(`<div class="platform-badge">${badge}</div>`);
+
+  // Compatibility badge
+  if (game.compatibility === 'windows-only') {
+    $tile.append(`<div class="compat-badge">REQUIRES WINDOWS</div>`);
+    $tile.addClass('blocked');
+  } else if (game.compatibility === 'online-blocked') {
+    $tile.append(`<div class="compat-badge online-blocked">OFFLINE ONLY</div>`);
+  }
+
   $tile.data('game', game);
   $gamelist.append($tile);
 });
@@ -192,14 +325,13 @@ if (allGames.length > 0) {
   if (fa) document.getElementById('util-ea-bg').style.backgroundImage = `url('${(fa+'').replace(/\\/g, '/')}')`;
 }
 
-// ===== CUSTOM ZONE NAVIGATION (replaces DomNavigator) =====
+// ===== CUSTOM ZONE NAVIGATION =====
 const zones = ['games', 'utilities'];
 let currentZone = 'games';
 let currentIndex = 0;
 let shutdownOpen = false;
 let shutdownIndex = 0;
 let mygamesOpen = false;
-let ytMode = false;
 
 function getZoneElements(zone) {
   if (zone === 'games') return Array.from(document.querySelectorAll('#gamelist .game'));
@@ -214,7 +346,6 @@ function updateSelection() {
     items[currentIndex].classList.add('selected');
     items[currentIndex].scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
   }
-  // Update hero background + music when on games
   if (currentZone === 'games') {
     const game = $(items[currentIndex]).data('game');
     updateBackground(game);
@@ -228,7 +359,7 @@ function updateSelection() {
 function navigate(direction) {
   if (shutdownOpen) { navigateShutdown(direction); return; }
   if (contextMenuOpen) { navigateContext(direction); return; }
-  if (mygamesOpen) { return; } // TODO: my games nav
+  if (mygamesOpen) { return; }
   const items = getZoneElements(currentZone);
   switch (direction) {
     case 'left':  currentIndex = Math.max(0, currentIndex - 1); break;
@@ -244,30 +375,27 @@ function navigate(direction) {
       break;
     }
   }
+  hasMovedOnce = true;
   updateSelection();
 }
 
-// Init first selection
 setTimeout(() => updateSelection(), 100);
 
 // ===== GAME MUSIC ON HOVER =====
 const GAME_MUSIC = {};
-// Map appId/game name to music file
 const musicDir = path.join(__dirname, '..', 'cache', 'music');
-// Skyrim
-['mus_maintheme.wma', 'mus_explore_day_01.wma', 'mus_sovngarde_chant_lp.wma'].forEach(f => {
-  const p = path.join(musicDir, '72850', f);
-  if (fs.existsSync(p)) { if (!GAME_MUSIC['72850']) GAME_MUSIC['72850'] = []; GAME_MUSIC['72850'].push(p); }
-});
-// PvZ GW2
-const pvzMusic = path.join(musicDir, 'pvz', 'main_theme.mp3');
-if (fs.existsSync(pvzMusic)) GAME_MUSIC['pvz'] = [pvzMusic];
-// LEGO Star Wars
-const swDir = path.join(musicDir, '920210');
-if (fs.existsSync(swDir)) {
-  const swFiles = fs.readdirSync(swDir).filter(f => f.endsWith('.mp3') || f.endsWith('.wma') || f.endsWith('.ogg'));
-  if (swFiles.length > 0) GAME_MUSIC['920210'] = swFiles.map(f => path.join(swDir, f));
-}
+
+// Auto-discover music by scanning the cache/music directory
+try {
+  for (const subdir of fs.readdirSync(musicDir, { withFileTypes: true })) {
+    if (!subdir.isDirectory()) continue;
+    const dirPath = path.join(musicDir, subdir.name);
+    const files = fs.readdirSync(dirPath).filter(f => f.endsWith('.mp3') || f.endsWith('.ogg'));
+    if (files.length > 0) {
+      GAME_MUSIC[subdir.name] = files.map(f => path.join(dirPath, f));
+    }
+  }
+} catch {}
 
 let currentAudio = null;
 let currentMusicKey = null;
@@ -275,17 +403,25 @@ let musicFadeTimer = null;
 let musicDelayTimer = null;
 let musicTrackIndex = 0;
 
+const MUSIC_START_OFFSET = {
+  '1091500': 18,  // Cyberpunk — skip 18s intro
+};
+
 function playGameMusic(game) {
-  const key = game ? (game.appId || game.platform) : null;
-  const musicKey = key && GAME_MUSIC[key] ? key : (game && game.platform === 'ea' && GAME_MUSIC['pvz'] ? 'pvz' : null);
+  if (!hasMovedOnce) return;
+
+  const key = game ? (game.appId || game.name?.toLowerCase().replace(/\s+/g, '') || game.platform) : null;
+  let musicKey = null;
+  if (key && GAME_MUSIC[key]) musicKey = key;
+  else if (game && game.platform === 'ea') musicKey = GAME_MUSIC['pvz'] ? 'pvz' : null;
+  else if (game && game.platform === 'epic' && game.name === 'Rocket League') musicKey = GAME_MUSIC['rocketleague'] ? 'rocketleague' : null;
+  else if (game && game.platform === 'backup' && game.name?.includes('Rocket')) musicKey = GAME_MUSIC['rocketleague'] ? 'rocketleague' : null;
 
   if (musicKey === currentMusicKey) return;
 
-  // Clear any pending fade-in
   clearTimeout(musicDelayTimer);
   clearInterval(musicFadeTimer);
 
-  // Fade out current
   if (currentAudio) {
     const dying = currentAudio;
     const fadeOut = setInterval(() => {
@@ -298,7 +434,6 @@ function playGameMusic(game) {
   currentMusicKey = musicKey;
   if (!musicKey || !GAME_MUSIC[musicKey]) return;
 
-  // Delay 600ms before starting music (so quick scrolling doesn't spam)
   musicDelayTimer = setTimeout(() => {
     const tracks = GAME_MUSIC[musicKey];
     musicTrackIndex = Math.floor(Math.random() * tracks.length);
@@ -310,9 +445,10 @@ function startTrack(tracks, idx) {
   const pick = tracks[idx % tracks.length];
   currentAudio = new Audio(pick.replace(/\\/g, '/'));
   currentAudio.volume = 0;
+  const offset = MUSIC_START_OFFSET[currentMusicKey] || 0;
+  if (offset > 0) currentAudio.currentTime = offset;
   currentAudio.play().catch(() => {});
 
-  // Fade in slowly
   musicFadeTimer = setInterval(() => {
     if (currentAudio && currentAudio.volume < 0.3) {
       currentAudio.volume = Math.min(0.3, currentAudio.volume + 0.01);
@@ -321,7 +457,6 @@ function startTrack(tracks, idx) {
     }
   }, 60);
 
-  // When track ends, crossfade to next
   currentAudio.addEventListener('ended', () => {
     musicTrackIndex++;
     startTrack(tracks, musicTrackIndex);
@@ -337,7 +472,6 @@ function updateBackground(game) {
     $logo.css('display', 'none');
     return;
   }
-  // Use unblurred hero image as background
   const heroSrc = game.hero || game.heroBlur;
   if (heroSrc) {
     $wp.attr('src', (heroSrc + '').replace(/\\/g, '/'));
@@ -374,55 +508,17 @@ window.addEventListener('gc.controller.lost', function(event) {
 
 window.addEventListener('gc.button.press', function(event) {
   const btn = event.detail.name;
-
-  // When YouTube TV is active, forward controller as keyboard to the BrowserView
-  if (ytMode) {
-    if (btn === 'DPAD_LEFT')  ipcRenderer.send('yt-key', 'Left');
-    if (btn === 'DPAD_RIGHT') ipcRenderer.send('yt-key', 'Right');
-    if (btn === 'DPAD_UP')    ipcRenderer.send('yt-key', 'Up');
-    if (btn === 'DPAD_DOWN')  ipcRenderer.send('yt-key', 'Down');
-    if (btn === 'FACE_1')     ipcRenderer.send('yt-key', 'Return');   // A = Enter/Select
-    if (btn === 'FACE_2')     { ipcRenderer.send('yt-key', 'Escape'); } // B = Back
-    if (btn === 'FACE_3')     ipcRenderer.send('yt-key', 'Space');    // X = Play/Pause
-    if (btn === 'FACE_4')     ipcRenderer.send('yt-key', 'Return');   // Y = Search/Enter
-    if (btn === 'LEFT_SHOULDER')  ipcRenderer.send('yt-key', 'MediaPreviousTrack'); // LB = Prev
-    if (btn === 'RIGHT_SHOULDER') ipcRenderer.send('yt-key', 'MediaNextTrack');     // RB = Next
-    if (btn === 'SELECT') {
-      // Back/View button = close YouTube, return to Patatin
-      ytMode = false;
-      ipcRenderer.send('close-youtube');
-    }
-    if (btn === 'START') {
-      // Start = toggle fullscreen in YouTube
-      ipcRenderer.send('yt-key', 'f');
-    }
-    return;
-  }
-
-  // Normal Patatin navigation
   if (btn === 'DPAD_LEFT')  { navigate('left'); playNavSound(); }
   if (btn === 'DPAD_RIGHT') { navigate('right'); playNavSound(); }
   if (btn === 'DPAD_UP')    { navigate('up'); playNavSound(); }
   if (btn === 'DPAD_DOWN')  { navigate('down'); playNavSound(); }
-  if (btn === 'FACE_1') handleA();    // A
-  if (btn === 'FACE_2') handleB();    // B
-  if (btn === 'FACE_4') {
-    ipcRenderer.send('open-youtube');
-    ytMode = true;
-  }
+  if (btn === 'FACE_1') handleA();
+  if (btn === 'FACE_2') handleB();
   if (btn === 'START') handleStartMenu();
 }, false);
 
 window.addEventListener('gc.analog.start', function(event) {
   const pos = event.detail.position;
-  if (ytMode) {
-    // Forward analog stick to YouTube TV
-    if (pos.x < -0.3) ipcRenderer.send('yt-key', 'Left');
-    if (pos.x > 0.3)  ipcRenderer.send('yt-key', 'Right');
-    if (pos.y < -0.3) ipcRenderer.send('yt-key', 'Up');
-    if (pos.y > 0.3)  ipcRenderer.send('yt-key', 'Down');
-    return;
-  }
   if (pos.x < -0.3) { navigate('left'); playNavSound(); }
   if (pos.x > 0.3)  { navigate('right'); playNavSound(); }
   if (pos.y < -0.3) { navigate('up'); playNavSound(); }
@@ -443,11 +539,11 @@ document.addEventListener('keydown', function(e) {
 function handleA() {
   if (shutdownOpen) { confirmShutdown(); return; }
   if (contextMenuOpen) { confirmContext(); return; }
-  if (mygamesOpen) { return; } // TODO
+  if (mygamesOpen) { return; }
   launchSelected();
 }
 
-// ===== GAME CONTEXT MENU (Start button) =====
+// ===== GAME CONTEXT MENU =====
 let contextMenuOpen = false;
 let contextMenuIndex = 0;
 
@@ -469,10 +565,8 @@ function openContextMenu(game) {
   $title.text(game.name);
   $opts.empty();
 
-  // "Quit game" — kills the game process if running
   if (game.installed) {
-    $opts.append(`<div class="context-option selected" data-action="quit">Quit game</div>`);
-    $opts.append(`<div class="context-option" data-action="launch">Launch game</div>`);
+    $opts.append(`<div class="context-option selected" data-action="launch">Launch game</div>`);
   }
   if (game.appId && game.platform === 'steam') {
     $opts.append(`<div class="context-option" data-action="store">View in Store</div>`);
@@ -507,18 +601,8 @@ function confirmContext() {
   const action = opts[contextMenuIndex]?.dataset.action;
   const game = $('#context-overlay').data('game');
 
-  if (action === 'quit' && game) {
-    // Kill the game process — try by exe name derived from game name
-    if (game.platform === 'steam' && game.appId) {
-      // steam://nav/games shows running games; steam://close/{appId} doesn't exist
-      // Best approach: taskkill by finding the process
-      const { exec } = require('child_process');
-      // For Steam games, tell Steam to stop the game
-      exec(`start "" "steam://gamepadui/running"`, () => {});
-      ipcRenderer.send('launch-uri', `steam://nav/games`);
-    }
-  } else if (action === 'launch' && game && game.launch) {
-    ipcRenderer.send('launch-uri', game.launch);
+  if (action === 'launch' && game) {
+    doLaunchGame(game);
   } else if (action === 'store' && game && game.appId) {
     ipcRenderer.send('launch-uri', `steam://store/${game.appId}`);
   }
@@ -529,7 +613,46 @@ function handleB() {
   if (shutdownOpen) { closeShutdownOverlay(); return; }
   if (contextMenuOpen) { closeContextMenu(); return; }
   if (mygamesOpen) { closeMygamesOverlay(); return; }
-  if (ytMode) { ytMode = false; ipcRenderer.send('close-youtube'); return; }
+  // B on main screen: hide Patatin
+  ipcRenderer.send('hide-window');
+}
+
+function showLoadingOverlay(game) {
+  const $overlay = $('#loading-overlay');
+  const $bg = $('#loading-bg');
+  const $logo = $('#loading-logo');
+  const $title = $('#loading-title');
+
+  const heroSrc = (game.heroBlur || game.hero || game.art || '').replace(/\\/g, '/');
+  if (heroSrc) { $bg.attr('src', heroSrc).show(); } else { $bg.hide(); }
+
+  const logoSrc = (game.logo || '').replace(/\\/g, '/');
+  if (logoSrc) { $logo.attr('src', logoSrc).show(); } else { $logo.hide(); }
+
+  $title.text(game.name || 'Loading...');
+  $overlay.css('display', 'flex');
+}
+
+function hideLoadingOverlay() {
+  $('#loading-overlay').css('display', 'none');
+}
+
+function doLaunchGame(game) {
+  // Check compatibility
+  if (game.compatibility === 'windows-only') {
+    notify('', `${game.name} requires Windows (anti-cheat not supported on Linux)`);
+    return;
+  }
+
+  showLoadingOverlay(game);
+
+  if (game.platform === 'steam' && game.appId) {
+    ipcRenderer.send('launch-uri', `steam://rungameid/${game.appId}`);
+  } else if (game.exe) {
+    ipcRenderer.send('launch-exe', game.exe);
+  } else if (game.launch) {
+    ipcRenderer.send('launch-uri', game.launch);
+  }
 }
 
 function launchSelected() {
@@ -537,21 +660,12 @@ function launchSelected() {
   const $el = $(items[currentIndex]);
   const game = $el.data('game');
   if (game) {
-    if (game.installed && game.exe) {
-      // Launch directly via exe — bypasses Steam Big Picture entirely
-      ipcRenderer.send('launch-exe', game.exe);
-    } else if (game.installed && game.launch) {
-      ipcRenderer.send('launch-uri', game.launch);
-    } else if (!game.installed && game.appId) {
-      ipcRenderer.send('launch-uri', `steam://install/${game.appId}`);
-    }
+    doLaunchGame(game);
     return;
   }
   // Utility tile
   const id = $el.attr('id');
   if (id === 'util-mygames') openMygamesOverlay();
-  else if (id === 'util-youtube') { ipcRenderer.send('open-youtube'); ytMode = true; }
-  else if (id === 'util-ea') ipcRenderer.send('launch-uri', 'com.electronicarts.ea-desktop://main');
 }
 
 // ===== SHUTDOWN OVERLAY =====
@@ -584,12 +698,11 @@ function confirmShutdown() {
   const opts = document.querySelectorAll('.shutdown-option');
   const action = opts[shutdownIndex]?.dataset.action;
   if (action === 'close') ipcRenderer.send('quit-app');
-  else if (action === 'restart') cp.exec('shutdown /r /t 0');
-  else if (action === 'shutdown') cp.exec('shutdown /s /t 0');
+  else if (action === 'restart') ipcRenderer.send('system-reboot');
+  else if (action === 'shutdown') ipcRenderer.send('system-shutdown');
   closeShutdownOverlay();
 }
 
-// Listen for shutdown overlay trigger from main process (F23 long press)
 ipcRenderer.on('show-shutdown-overlay', () => openShutdownOverlay());
 
 // ===== MY GAMES & APPS OVERLAY =====
@@ -607,49 +720,16 @@ function closeMygamesOverlay() {
 function populateMygames() {
   const $grid = $('#mygames-grid');
   $grid.empty();
-
-  // Show installed games
-  allGames.forEach((game, i) => {
+  allGames.forEach((game) => {
     const $tile = $(`<div class="mg-tile"></div>`);
     if (game.art) $tile.css('background-image', `url('${(game.art+'').replace(/\\/g, '/')}')`);
     $tile.append(`<div class="mg-name">${game.name}</div>`);
+    if (game.compatibility === 'windows-only') {
+      $tile.append(`<div class="mg-blocked">REQUIRES WINDOWS</div>`);
+      $tile.addClass('blocked');
+    }
+    $tile.data('game', game);
     $grid.append($tile);
-  });
-
-  // Fetch featured non-installed games
-  fetchFeaturedGames().then(featured => {
-    const installedIds = new Set(allGames.map(g => g.appId));
-    const notInstalled = featured.filter(g => !installedIds.has(g.appId)).slice(0, 8);
-    notInstalled.forEach(game => {
-      const $tile = $(`<div class="mg-tile not-installed"></div>`);
-      if (game.art) $tile.css('background-image', `url('${game.art}')`);
-      $tile.append(`<div class="install-badge">GET</div>`);
-      if (game.price) $tile.append(`<div class="price-badge">${game.price}</div>`);
-      $tile.append(`<div class="mg-name">${game.name}</div>`);
-      $tile.data('game', game);
-      $grid.append($tile);
-    });
-  });
-}
-
-function fetchFeaturedGames() {
-  return new Promise((resolve) => {
-    https.get('https://store.steampowered.com/api/featured/', (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        try {
-          const json = JSON.parse(data);
-          const featured = (json.featured_win || []).map(g => ({
-            name: g.name, appId: String(g.id), platform: 'steam', installed: false,
-            art: g.large_capsule_image || `https://cdn.cloudflare.steamstatic.com/steam/apps/${g.id}/library_600x900.jpg`,
-            launch: `steam://install/${g.id}`,
-            price: g.final_price ? (g.final_price === 0 ? 'Free' : `$${(g.final_price / 100).toFixed(2)}`) : '',
-          }));
-          resolve(featured);
-        } catch { resolve([]); }
-      });
-    }).on('error', () => resolve([]));
   });
 }
 
@@ -662,6 +742,30 @@ function notify(img, text) {
     <p class="not_txt">${text}</p>
   </div>`);
 }
+
+// ===== MUTE WHEN GAME RUNNING OR PATATIN HIDDEN =====
+ipcRenderer.on('game-launched', () => {
+  if (currentAudio) { currentAudio.pause(); currentAudio.currentTime = 0; currentAudio = null; }
+  currentMusicKey = null;
+});
+
+ipcRenderer.on('game-ready', () => {
+  hideLoadingOverlay();
+});
+
+ipcRenderer.on('patatin-hidden', () => {
+  if (currentAudio) { currentAudio.pause(); }
+});
+
+ipcRenderer.on('patatin-shown', () => {
+  hideLoadingOverlay();
+  const items = getZoneElements(currentZone);
+  if (currentZone === 'games' && items[currentIndex]) {
+    const game = $(items[currentIndex]).data('game');
+    currentMusicKey = null;
+    playGameMusic(game);
+  }
+});
 
 // ===== FPS =====
 const times = [];

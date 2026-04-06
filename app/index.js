@@ -1,45 +1,22 @@
-// Patatin — main process (based on xbox-ui-windows)
-const { app, BrowserWindow, BrowserView, ipcMain, shell, globalShortcut } = require('electron');
+// Patatin — main process (Linux port, launched by listener.js)
+const { app, BrowserWindow, BrowserView, ipcMain, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const { execSync, spawn } = require('child_process');
+const { spawn, exec } = require('child_process');
+const os = require('os');
 
 let mainWindow = null;
 let youtubeView = null;
-
-// ===== Disable Game Bar from claiming Xbox Home button =====
-try {
-  execSync('reg add "HKCU\\SOFTWARE\\Microsoft\\GameBar" /v UseNexusForGameBarEnabled /t REG_DWORD /d 0 /f', { windowsHide: true });
-  execSync('reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\GameDVR" /v AppCaptureEnabled /t REG_DWORD /d 0 /f', { windowsHide: true });
-} catch {}
-
-// ===== Disable Steam from stealing the Xbox Guide button =====
-try {
-  // Disable Steam Input for Xbox controllers so Steam Big Picture doesn't intercept Guide
-  execSync('reg add "HKCU\\Software\\Valve\\Steam" /v SteamController_XBoxSupport /t REG_DWORD /d 0 /f', { windowsHide: true });
-} catch {}
-
-// Also disable Steam's Guide button chord (Big Picture shortcut)
-const steamConfigDir = 'C:\\Program Files (x86)\\Steam\\config';
-const steamConfigFile = path.join(steamConfigDir, 'config.vdf');
-if (fs.existsSync(steamConfigFile)) {
-  try {
-    let cfg = fs.readFileSync(steamConfigFile, 'utf8');
-    // Disable the Guide button from opening Big Picture
-    if (!cfg.includes('"UseSteamControllerConfig"')) {
-      // Don't modify if we can't find the right spot — registry approach is primary
-    }
-  } catch {}
-}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1920,
     height: 1080,
     fullscreen: true,
+    frame: false,
     autoHideMenuBar: true,
-    title: "Patatin",
-    icon: path.join(__dirname, "icon.png"),
+    title: 'Patatin',
+    icon: path.join(__dirname, 'icon.png'),
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
@@ -47,8 +24,24 @@ function createWindow() {
     },
   });
 
-  mainWindow.loadFile('index.html');
+  mainWindow.loadFile(path.join(__dirname, 'index.html'));
   mainWindow.setMenuBarVisibility(false);
+
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.key === 'F11') {
+      mainWindow.setFullScreen(!mainWindow.isFullScreen());
+    }
+    if (input.key === 'Escape' && mainWindow.isFullScreen()) {
+      mainWindow.setFullScreen(false);
+    }
+  });
+
+  // If launched with --shutdown-overlay, tell renderer to show it
+  if (process.argv.includes('--shutdown-overlay')) {
+    mainWindow.webContents.on('did-finish-load', () => {
+      mainWindow.webContents.send('show-shutdown-overlay');
+    });
+  }
 }
 
 // ===== YouTube TV =====
@@ -76,7 +69,6 @@ function openYouTubeTV() {
   youtubeView.webContents.loadURL('https://www.youtube.com/tv');
 }
 
-// Forward controller key events to YouTube TV BrowserView
 ipcMain.on('yt-key', (event, key) => {
   if (youtubeView && ytActive) {
     youtubeView.webContents.sendInputEvent({ type: 'keyDown', keyCode: key });
@@ -94,48 +86,58 @@ function resizeYouTubeView() {
 
 function closeYouTubeTV() {
   ytActive = false;
-  if (youtubeView) mainWindow.removeBrowserView(youtubeView);
+  if (youtubeView && mainWindow) mainWindow.removeBrowserView(youtubeView);
 }
 
-// ===== IPC =====
+// ===== IPC handlers =====
 ipcMain.on('open-youtube', () => openYouTubeTV());
 ipcMain.on('close-youtube', () => closeYouTubeTV());
 ipcMain.on('launch-uri', (event, uri) => shell.openExternal(uri));
+
 ipcMain.on('launch-exe', (event, exe) => {
-  require('child_process').exec(`start "" "${exe}"`);
+  // Launch non-Steam games through Proton
+  const gameName = path.basename(path.dirname(exe));
+  const slug = gameName.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+  const prefixDir = path.join(os.homedir(), '.proton', slug);
+  fs.mkdirSync(prefixDir, { recursive: true });
+
+  const steamRoot = path.join(os.homedir(), '.steam', 'steam');
+  let protonBin = null;
+  try {
+    const commonDir = path.join(steamRoot, 'steamapps', 'common');
+    for (const d of fs.readdirSync(commonDir)) {
+      if (d.startsWith('Proton')) {
+        const candidate = path.join(commonDir, d, 'proton');
+        if (fs.existsSync(candidate)) { protonBin = candidate; break; }
+      }
+    }
+  } catch {}
+
+  if (protonBin) {
+    const env = {
+      ...process.env,
+      STEAM_COMPAT_DATA_PATH: prefixDir,
+      STEAM_COMPAT_CLIENT_INSTALL_PATH: steamRoot,
+      PROTON_ENABLE_NVAPI: '1',
+      DXVK_ENABLE_NVAPI: '1',
+    };
+    const child = spawn(protonBin, ['run', exe], { env, detached: true, stdio: 'ignore' });
+    child.unref();
+  }
+
+  // Quit Patatin after launching game
+  setTimeout(() => app.quit(), 2000);
 });
+
 ipcMain.on('quit-app', () => app.quit());
+ipcMain.on('hide-window', () => app.quit());
+ipcMain.on('system-shutdown', () => { exec('systemctl poweroff'); });
+ipcMain.on('system-reboot', () => { exec('systemctl reboot'); });
 
 // ===== APP READY =====
 app.whenReady().then(() => {
   createWindow();
   mainWindow.on('resize', resizeYouTubeView);
-
-  // F24 = Xbox short press → toggle Patatin
-  globalShortcut.register('F24', () => {
-    if (mainWindow.isVisible() && mainWindow.isFocused()) {
-      mainWindow.hide();
-    } else {
-      mainWindow.show();
-      mainWindow.focus();
-      mainWindow.setFullScreen(true);
-    }
-  });
-
-  // F23 = Xbox long press → show shutdown overlay
-  globalShortcut.register('F23', () => {
-    mainWindow.show();
-    mainWindow.focus();
-    mainWindow.setFullScreen(true);
-    mainWindow.webContents.send('show-shutdown-overlay');
-  });
-
-  // Auto-launch xbox-button-remapper if available
-  const remapperPath = path.join(__dirname, '..', 'tools', 'xbox-button-remapper', 'Xbox Controller button remapper.exe');
-  if (fs.existsSync(remapperPath)) {
-    spawn(remapperPath, [], { detached: true, stdio: 'ignore' }).unref();
-  }
 });
 
-app.on('will-quit', () => globalShortcut.unregisterAll());
 app.on('window-all-closed', () => app.quit());

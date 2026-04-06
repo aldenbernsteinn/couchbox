@@ -32,13 +32,8 @@
 
             <div id="utilityrow">
                 <div class="utile green" id="util-mygames">
-                    <svg class="utile-svg" viewBox="0 0 24 24" fill="white"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14.5v-9l6 4.5-6 4.5z"/></svg>
-                    <svg class="utile-svg" viewBox="0 0 24 24" fill="white" style="margin-left:-8px"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14.5v-9l6 4.5-6 4.5z"/></svg>
+                    <svg class="utile-svg" viewBox="0 0 24 24" fill="white"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12zM10 9h8v2h-8V9zm0 3h4v2h-4v-2zm0-6h8v2h-8V6z"/></svg>
                     <span class="utile-label">My games<br>& apps</span>
-                </div>
-                <div class="utile dark wide" id="util-youtube">
-                    <svg class="utile-svg" viewBox="0 0 24 24" fill="white"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
-                    <span class="utile-label">YouTube TV</span>
                 </div>
                 <div class="utile featured" id="util-ea">
                     <div class="utile-featured-bg" id="util-ea-bg"></div>
@@ -61,6 +56,16 @@
             <div class="context-box">
                 <h3 id="context-title"></h3>
                 <div id="context-options"></div>
+            </div>
+        </div>
+
+        <!-- Loading Overlay (shown while game is launching) -->
+        <div id="loading-overlay" style="display:none">
+            <img id="loading-bg" class="loading-bg" />
+            <div class="loading-content">
+                <img id="loading-logo" class="loading-logo" />
+                <h2 id="loading-title"></h2>
+                <div class="loading-spinner"></div>
             </div>
         </div>
 
