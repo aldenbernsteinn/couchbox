@@ -23,13 +23,16 @@ const STEAM_ROOT = STEAM_PATHS[0] || '';
 // Games that won't work on Linux (kernel-level anti-cheat)
 const WINDOWS_ONLY = new Set(['Call of Duty HQ', 'Call of Duty', 'Battlefield 6']);
 const ONLINE_BLOCKED = new Set(['Rocket League', 'rocketleague']);
+// Hidden from Patatin UI — either not games, not installed, or no controller support
 const HIDDEN_APPS = new Set([
   'Wallpaper Engine', 'wallpaper_engine', 'Steamworks Common Redistributables',
   'Steam Controller Configs', 'Steamworks Shared', 'Proton Experimental',
   'Proton EasyAntiCheat Runtime', 'Proton BattlEye Runtime',
   'Steam Linux Runtime', 'Steam Linux Runtime - Soldier', 'Steam Linux Runtime - Sniper',
+  'Steam Linux Runtime 3.0 (sniper)',
   'LEGO® Star Wars™: The Skywalker Saga', 'LEGO Star Wars - The Skywalker Saga',
   'Oblivion Remastered',
+  "Garry's Mod", // No controller support
 ]);
 
 // ===== Profile =====
@@ -112,7 +115,7 @@ setInterval(() => {
 // ===== EA ART LOOKUP =====
 const EA_ART = {
   'Plants vs Zombies Garden Warfare 2': {
-    tile: 'https://cdn.cloudflare.steamstatic.com/steam/apps/590390/header.jpg',
+    tile: '/mnt/windows/Program Files/EA Games/Plants vs Zombies Garden Warfare 2/EAAntiCheat.splash.png',
     hero: 'https://media.contentapi.ea.com/content/dam/gin/images/2016/01/pvzgw2-plantsvszombiesgardenwarfare2-background-key-art.jpg',
   },
 };
@@ -218,7 +221,7 @@ function detectEAGames() {
         name: dir.name, platform: 'ea', installed: true,
         compatibility: 'proton',
         art: eaArt.tile || null,
-        heroBlur: null,
+        heroBlur: eaArt.hero || null,
         hero: eaArt.hero || null,
         logo: null,
         launch: eaExe,
