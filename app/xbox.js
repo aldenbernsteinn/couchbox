@@ -232,6 +232,12 @@ function detectEAGames() {
   return games;
 }
 
+// Overlay mounts: game dir name → local overlay path (writable via fuse-overlayfs)
+const OVERLAY_MOUNTS = {
+  'HogwartsLegacy': path.join(os.homedir(), 'Games', 'HogwartsLegacy'),
+  'Plants vs Zombies Garden Warfare 2': path.join(os.homedir(), 'Games', 'PvZGW2'),
+};
+
 function detectBackupGames() {
   const games = [];
   const gamesDir = path.join(WINDOWS_MNT, 'Users', 'Alden Bernstein', 'Cross-Plat-Games', 'Games');
@@ -259,12 +265,23 @@ function detectBackupGames() {
         }
       } catch {}
 
-      // Try to find art from known sources
+      // Remap exe to overlay mount so Proton writes go to writable layer
+      if (OVERLAY_MOUNTS[gameName] && mainExe) {
+        const overlayBase = OVERLAY_MOUNTS[gameName];
+        if (fs.existsSync(overlayBase)) {
+          mainExe = path.join(overlayBase, path.relative(gamePath, mainExe));
+        }
+      }
+
+      // Art and launcher assignment per game
       let art = null;
       let hero = null;
+      let launcher = 'proton'; // default: direct Proton
+      let epicAppId = null;
       if (gameName.includes('Hogwarts')) {
         art = 'https://cdn.cloudflare.steamstatic.com/steam/apps/990080/library_600x900.jpg';
         hero = 'https://cdn.cloudflare.steamstatic.com/steam/apps/990080/library_hero.jpg';
+        launcher = 'proton';
       } else if (gameName.toLowerCase().includes('rocket')) {
         art = 'https://cdn.cloudflare.steamstatic.com/steam/apps/252950/library_600x900.jpg';
         hero = 'https://cdn.cloudflare.steamstatic.com/steam/apps/252950/library_hero.jpg';
@@ -272,7 +289,7 @@ function detectBackupGames() {
 
       games.push({
         name: gameName, platform: 'backup', installed: true,
-        compatibility,
+        compatibility, launcher, epicAppId,
         art, hero, heroBlur: hero, logo: null,
         launch: mainExe,
         exe: mainExe,
@@ -650,8 +667,10 @@ function doLaunchGame(game) {
   showLoadingOverlay(game);
 
   if (game.platform === 'steam' && game.appId) {
+    // Steam games — launch via Steam/Proton
     ipcRenderer.send('launch-uri', `steam://rungameid/${game.appId}`);
   } else if (game.exe) {
+    // Fallback: direct Proton launch
     ipcRenderer.send('launch-exe', game.exe);
   } else if (game.launch) {
     ipcRenderer.send('launch-uri', game.launch);

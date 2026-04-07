@@ -103,15 +103,30 @@ ipcMain.on('launch-exe', (event, exe) => {
 
   const steamRoot = path.join(os.homedir(), '.steam', 'steam');
   let protonBin = null;
-  try {
-    const commonDir = path.join(steamRoot, 'steamapps', 'common');
-    for (const d of fs.readdirSync(commonDir)) {
-      if (d.startsWith('Proton')) {
-        const candidate = path.join(commonDir, d, 'proton');
-        if (fs.existsSync(candidate)) { protonBin = candidate; break; }
+  const protonSearchDirs = [
+    path.join(steamRoot, 'steamapps', 'common'),
+    path.join(os.homedir(), '.steam', 'overlay', 'upper-common'),
+  ];
+  for (const searchDir of protonSearchDirs) {
+    if (protonBin) break;
+    try {
+      for (const d of fs.readdirSync(searchDir)) {
+        if (d.startsWith('Proton')) {
+          const candidate = path.join(searchDir, d, 'proton');
+          if (fs.existsSync(candidate)) { protonBin = candidate; break; }
+        }
       }
+    } catch {}
+  }
+
+  // Proton needs Steam runtime — start Steam if not running
+  if (protonBin) {
+    try {
+      require('child_process').execSync('pgrep -x steam', { stdio: 'pipe' });
+    } catch {
+      spawn('steam', ['-silent'], { detached: true, stdio: 'ignore' }).unref();
     }
-  } catch {}
+  }
 
   if (protonBin) {
     const env = {
@@ -128,6 +143,7 @@ ipcMain.on('launch-exe', (event, exe) => {
   // Quit Patatin after launching game
   setTimeout(() => app.quit(), 2000);
 });
+
 
 ipcMain.on('quit-app', () => app.quit());
 ipcMain.on('hide-window', () => app.quit());

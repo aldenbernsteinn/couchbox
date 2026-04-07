@@ -12,19 +12,20 @@ app.on('ready', () => {
   const { screen } = require('electron');
   const display = screen.getPrimaryDisplay();
   const { width, height } = display.workAreaSize;
+  const kbWidth = 620;
   const kbHeight = 340;
 
   win = new BrowserWindow({
-    x: 0,
-    y: height - kbHeight,
-    width: width,
+    x: Math.round((width - kbWidth) / 2),
+    y: height - kbHeight - 40,
+    width: kbWidth,
     height: kbHeight,
     frame: false,
     transparent: true,
     alwaysOnTop: true,
     skipTaskbar: true,
     resizable: false,
-    focusable: false,      // don't steal focus from the text field
+    focusable: false,
     hasShadow: false,
     webPreferences: {
       nodeIntegration: true,
@@ -35,7 +36,6 @@ app.on('ready', () => {
   win.loadFile(path.join(__dirname, 'keyboard.html'));
   win.setAlwaysOnTop(true, 'screen-saver');
 
-  // Prevent the window from being focused (keep focus on the text field)
   win.on('focus', () => {
     win.blur();
   });

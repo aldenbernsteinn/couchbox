@@ -28,7 +28,6 @@ const AXIS_RIGHT_Y = 4;
 const AXIS_RT = 5;
 const AXIS_DPAD_X = 6;
 const AXIS_DPAD_Y = 7;
-const LONG_PRESS_MS = 800;
 
 // Mouse mode settings
 const DEADZONE = 4000;          // ~12% of 32767, ignore stick drift
@@ -52,7 +51,6 @@ const EV_KEY = 0x01;  // key/button press
 // Electron state
 let electronProc = null;
 let guideDown = false;
-let longPressTimer = null;
 
 // Mouse mode state
 let stickX = 0;
@@ -115,6 +113,9 @@ function applyDeadzone(val) {
 }
 
 function mouseMoveTick() {
+  // Don't move mouse when keyboard overlay is open (type mode)
+  if (keyboardProc) return;
+
   // Left stick → mouse movement
   const dx = applyDeadzone(stickX);
   const dy = applyDeadzone(stickY);
@@ -379,14 +380,8 @@ function onRightTrigger(value) {
 function onGuideButton(pressed) {
   if (pressed) {
     guideDown = true;
-    longPressTimer = setTimeout(() => {
-      guideDown = false;
-      if (electronProc) killPatatin();
-      setTimeout(() => launchPatatin(['--shutdown-overlay']), 300);
-    }, LONG_PRESS_MS);
   } else {
     if (guideDown) {
-      clearTimeout(longPressTimer);
       guideDown = false;
       if (electronProc) {
         killPatatin();

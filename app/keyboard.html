@@ -4,15 +4,17 @@
 <meta charset="UTF-8">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
+  html, body {
     background: transparent;
     font-family: 'Segoe UI Variable', 'Segoe UI', sans-serif;
     user-select: none;
     -webkit-app-region: no-drag;
+    overflow: hidden;
   }
   #keyboard {
     background: rgba(20, 20, 20, 0.92);
-    border-top: 2px solid rgba(255,255,255,0.1);
+    border: 2px solid rgba(255,255,255,0.1);
+    border-radius: 16px;
     padding: 12px 20px;
     display: flex;
     flex-direction: column;
@@ -37,7 +39,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: background 0.1s, border-color 0.1s, transform 0.1s;
+    transition: background 0.05s, border-color 0.05s, transform 0.05s;
   }
   .key.selected {
     background: rgba(20, 180, 19, 0.5);
@@ -61,15 +63,60 @@
     text-align: center;
     padding: 2px 0;
   }
+  #hints {
+    display: flex;
+    gap: 16px;
+    justify-content: center;
+    padding: 6px 0 2px;
+  }
+  .hint {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: rgba(255,255,255,0.45);
+    font-size: 12px;
+  }
+  .hint-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    font-size: 11px;
+    font-weight: 700;
+    color: white;
+  }
+  .hint-btn.x { background: #0078d4; }
+  .hint-btn.y { background: #d4a600; }
+  .hint-btn.b { background: #c42b1c; }
 </style>
 </head>
 <body>
 <div id="keyboard">
   <div id="preview"></div>
   <!-- rows built by JS -->
+  <div id="hints">
+    <span class="hint"><span class="hint-btn x">X</span> Backspace</span>
+    <span class="hint"><span class="hint-btn y">Y</span> Space</span>
+    <span class="hint"><span class="hint-btn b">B</span> Close</span>
+  </div>
 </div>
 <script>
 const { ipcRenderer } = require('electron');
+const path = require('path');
+
+// Xbox keyboard sounds
+const sndMove = new Audio(path.join(__dirname, 'sounds', 'key-move.mp3'));
+const sndPress = new Audio(path.join(__dirname, 'sounds', 'key-press.mp3'));
+sndMove.volume = 0.5;
+sndPress.volume = 0.7;
+
+function playSound(snd) {
+  const clone = snd.cloneNode();
+  clone.volume = snd.volume;
+  clone.play();
+}
 
 const ROWS_LOWER = [
   ['1','2','3','4','5','6','7','8','9','0'],
@@ -90,14 +137,12 @@ const ROWS_UPPER = [
 let shifted = false;
 let selRow = 1;
 let selCol = 0;
-let keys = [];  // 2D array of DOM elements
-let navCooldown = false;
+let keys = [];
 
 function currentRows() { return shifted ? ROWS_UPPER : ROWS_LOWER; }
 
 function buildKeyboard() {
   const kb = document.getElementById('keyboard');
-  // Remove old rows (keep preview)
   const preview = document.getElementById('preview');
   kb.innerHTML = '';
   kb.appendChild(preview);
@@ -122,7 +167,6 @@ function buildKeyboard() {
     }
     kb.appendChild(rowDiv);
   }
-  // Clamp selection
   if (selRow >= keys.length) selRow = keys.length - 1;
   if (selCol >= keys[selRow].length) selCol = keys[selRow].length - 1;
   updateSelection();
@@ -138,12 +182,13 @@ function updateSelection() {
 }
 
 function navigate(dr, dc) {
-  if (navCooldown) return;
+  const oldRow = selRow, oldCol = selCol;
   selRow = Math.max(0, Math.min(keys.length - 1, selRow + dr));
   selCol = Math.max(0, Math.min(keys[selRow].length - 1, selCol + dc));
+  if (selRow !== oldRow || selCol !== oldCol) {
+    playSound(sndMove);
+  }
   updateSelection();
-  navCooldown = true;
-  setTimeout(() => { navCooldown = false; }, 150);
 }
 
 function pressSelected() {
@@ -152,6 +197,7 @@ function pressSelected() {
   const el = keys[selRow][selCol];
   el.classList.add('pressed');
   setTimeout(() => el.classList.remove('pressed'), 120);
+  playSound(sndPress);
 
   if (label === 'Shift') {
     shifted = !shifted;
@@ -167,6 +213,9 @@ const STICK_THRESHOLD = 0.4;
 let stickHeld = { up: false, down: false, left: false, right: false };
 let aHeld = false;
 let bHeld = false;
+let xHeld = false;
+let yHeld = false;
+let rtHeld = false;
 
 function pollGamepad() {
   const gamepads = navigator.getGamepads();
@@ -179,7 +228,6 @@ function pollGamepad() {
   const lx = gp.axes[0] || 0;
   const ly = gp.axes[1] || 0;
 
-  // D-pad buttons (indices 12-15 on standard mapping)
   const dUp = gp.buttons[12] && gp.buttons[12].pressed;
   const dDown = gp.buttons[13] && gp.buttons[13].pressed;
   const dLeft = gp.buttons[14] && gp.buttons[14].pressed;
@@ -197,20 +245,43 @@ function pollGamepad() {
 
   stickHeld = { up, down, left, right };
 
-  // A button = type selected key
   const aPressed = gp.buttons[0] && gp.buttons[0].pressed;
   if (aPressed && !aHeld) pressSelected();
   aHeld = aPressed;
 
-  // B button = close keyboard
   const bPressed = gp.buttons[1] && gp.buttons[1].pressed;
   if (bPressed && !bHeld) ipcRenderer.send('close-keyboard');
   bHeld = bPressed;
+
+  // X = backspace hotkey
+  const xPressed = gp.buttons[2] && gp.buttons[2].pressed;
+  if (xPressed && !xHeld) {
+    playSound(sndPress);
+    ipcRenderer.send('type-key', 'Backspace');
+  }
+  xHeld = xPressed;
+
+  // Y = space hotkey
+  const yPressed = gp.buttons[3] && gp.buttons[3].pressed;
+  if (yPressed && !yHeld) {
+    playSound(sndPress);
+    ipcRenderer.send('type-key', 'Space');
+  }
+  yHeld = yPressed;
+
+  // RT (axis 5 mapped as button index 7 in standard gamepad) = Enter + close
+  const rtVal = gp.buttons[7] && gp.buttons[7].value || 0;
+  const rtPressed = rtVal > 0.5;
+  if (rtPressed && !rtHeld) {
+    playSound(sndPress);
+    ipcRenderer.send('type-key', 'Enter');
+    setTimeout(() => ipcRenderer.send('close-keyboard'), 100);
+  }
+  rtHeld = rtPressed;
 }
 
 setInterval(pollGamepad, 50);
 
-// ── Init ─────────────────────────────────────────────────────────
 buildKeyboard();
 </script>
 </body>
