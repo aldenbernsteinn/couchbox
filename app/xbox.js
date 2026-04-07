@@ -312,7 +312,28 @@ const allGames = allGamesRaw.filter(g => {
 
 const $gamelist = $('#gamelist');
 $gamelist.empty();
-allGames.slice(0, 12).forEach((game, i) => {
+
+// Check for running game — add "Resume" tile at top
+const runningGameEnv = process.env.PATATIN_RUNNING_GAME;
+let resumeGame = null;
+if (runningGameEnv) {
+  try { resumeGame = JSON.parse(runningGameEnv); } catch {}
+}
+if (resumeGame && resumeGame.name) {
+  const $resume = $(`<div class="game latest resume-tile" id="game-resume"></div>`);
+  // Find the game art from allGames
+  const matchedGame = allGames.find(g => g.name === resumeGame.name || g.appId === resumeGame.appId);
+  if (matchedGame && matchedGame.art) {
+    $resume.css('background-image', `url('${(matchedGame.art + '').replace(/\\/g, '/')}')`);
+  } else {
+    $resume.css('background', 'linear-gradient(135deg, #1a5c1a, #0a3a0a)');
+  }
+  $resume.append(`<div class="platform-badge" style="background:var(--theme-color)">RESUME</div>`);
+  $resume.data('game', { ...resumeGame, _resume: true });
+  $gamelist.append($resume);
+}
+
+allGames.slice(0, resumeGame ? 11 : 12).forEach((game, i) => {
   const classes = i === 0 ? 'game latest' : 'game';
   const $tile = $(`<div class="${classes}" id="game-${i}"></div>`);
   if (game.art) {
@@ -377,6 +398,8 @@ function updateSelection() {
 }
 
 function navigate(direction) {
+  if (closeGameOpen) { navigateCloseGame(direction); return; }
+  if (gameRunningOpen) { navigateGameRunning(direction); return; }
   if (shutdownOpen) { navigateShutdown(direction); return; }
   if (contextMenuOpen) { navigateContext(direction); return; }
   if (mygamesOpen) { return; }
@@ -557,6 +580,8 @@ document.addEventListener('keydown', function(e) {
 
 // ===== ACTIONS =====
 function handleA() {
+  if (closeGameOpen) { confirmCloseGame(); return; }
+  if (gameRunningOpen) { confirmGameRunning(); return; }
   if (shutdownOpen) { confirmShutdown(); return; }
   if (contextMenuOpen) { confirmContext(); return; }
   if (mygamesOpen) { return; }
@@ -630,6 +655,8 @@ function confirmContext() {
 }
 
 function handleB() {
+  if (closeGameOpen) { cancelCloseGame(); return; }
+  if (gameRunningOpen) { cancelGameRunning(); return; }
   if (shutdownOpen) { closeShutdownOverlay(); return; }
   if (contextMenuOpen) { closeContextMenu(); return; }
   if (mygamesOpen) { closeMygamesOverlay(); return; }
@@ -657,24 +684,156 @@ function hideLoadingOverlay() {
   $('#loading-overlay').css('display', 'none');
 }
 
-function doLaunchGame(game) {
+async function doLaunchGame(game) {
   // Check compatibility
   if (game.compatibility === 'windows-only') {
     notify('', `${game.name} requires Windows (anti-cheat not supported on Linux)`);
     return;
   }
 
+  // Check if another game is already running
+  const running = await ipcRenderer.invoke('check-running-game');
+  if (running && running.name) {
+    openGameRunningDialog(running.name, game);
+    return;
+  }
+
+  // Set game state so listener can track it
+  ipcRenderer.send('set-running-game', {
+    name: game.name,
+    appId: game.appId || null,
+    platform: game.platform,
+    pid: null,
+  });
+
   showLoadingOverlay(game);
 
   if (game.platform === 'steam' && game.appId) {
-    // Steam games — launch via Steam/Proton
     ipcRenderer.send('launch-uri', `steam://rungameid/${game.appId}`);
+    // Quit after showing loading for a bit — listener manages from here
+    setTimeout(() => ipcRenderer.send('quit-app'), 3000);
   } else if (game.exe) {
-    // Fallback: direct Proton launch
     ipcRenderer.send('launch-exe', game.exe);
   } else if (game.launch) {
     ipcRenderer.send('launch-uri', game.launch);
+    setTimeout(() => ipcRenderer.send('quit-app'), 3000);
   }
+}
+
+// ===== GAME ALREADY RUNNING DIALOG =====
+let gameRunningOpen = false;
+let gameRunningIdx = 0;
+let _pendingNewGame = null;
+
+function openGameRunningDialog(currentGameName, newGame) {
+  gameRunningOpen = true;
+  gameRunningIdx = 0;
+  _pendingNewGame = newGame;
+  const $overlay = $(`
+    <div id="game-running-overlay" style="position:fixed;inset:0;z-index:100001;background:rgba(0,0,0,0.85);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:20px;backdrop-filter:blur(20px);">
+      <h2 style="font-size:24px;color:white;font-weight:600;">${currentGameName} is still running</h2>
+      <p style="color:rgba(255,255,255,0.6);font-size:16px;">Close it to play ${newGame.name}?</p>
+      <div style="display:flex;gap:16px;margin-top:10px;">
+        <div class="gr-btn" data-action="close" style="padding:12px 32px;border-radius:10px;background:rgba(200,30,30,0.5);border:2px solid rgba(255,60,60,0.6);color:white;font-size:16px;">Close ${currentGameName}</div>
+        <div class="gr-btn" data-action="cancel" style="padding:12px 32px;border-radius:10px;background:rgba(255,255,255,0.08);border:2px solid rgba(255,255,255,0.12);color:white;font-size:16px;">Cancel</div>
+      </div>
+    </div>
+  `);
+  $('body').append($overlay);
+  updateGameRunningSelection();
+}
+
+function updateGameRunningSelection() {
+  $('.gr-btn').each(function(i) {
+    $(this).css({
+      outline: i === gameRunningIdx ? '2px solid var(--theme-color)' : 'none',
+      transform: i === gameRunningIdx ? 'scale(1.05)' : '',
+      boxShadow: i === gameRunningIdx ? '0 0 16px rgba(20,180,19,0.4)' : '',
+    });
+  });
+}
+
+function navigateGameRunning(dir) {
+  if (dir === 'left' || dir === 'right') {
+    gameRunningIdx = 1 - gameRunningIdx;
+    updateGameRunningSelection();
+  }
+}
+
+function confirmGameRunning() {
+  const action = $('.gr-btn').eq(gameRunningIdx).data('action');
+  $('#game-running-overlay').remove();
+  gameRunningOpen = false;
+  if (action === 'close' && _pendingNewGame) {
+    ipcRenderer.send('kill-running-game');
+    const g = _pendingNewGame;
+    _pendingNewGame = null;
+    setTimeout(() => doLaunchGame(g), 2000);
+  }
+  _pendingNewGame = null;
+}
+
+function cancelGameRunning() {
+  $('#game-running-overlay').remove();
+  gameRunningOpen = false;
+  _pendingNewGame = null;
+}
+
+// ===== CLOSE GAME OVERLAY (triggered by long Guide press) =====
+let closeGameOpen = false;
+let closeGameIdx = 0;
+let _closeGameName = '';
+
+ipcRenderer.on('show-close-game-overlay', (event, gameName) => {
+  closeGameOpen = true;
+  closeGameIdx = 0;
+  _closeGameName = gameName;
+  const $overlay = $(`
+    <div id="close-game-overlay" style="position:fixed;inset:0;z-index:100001;background:rgba(0,0,0,0.85);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:20px;backdrop-filter:blur(20px);">
+      <h2 style="font-size:24px;color:white;font-weight:600;">Close ${gameName}?</h2>
+      <div style="display:flex;gap:16px;margin-top:10px;">
+        <div class="cg-btn" data-action="close" style="padding:12px 32px;border-radius:10px;background:rgba(200,30,30,0.5);border:2px solid rgba(255,60,60,0.6);color:white;font-size:16px;">Close Game</div>
+        <div class="cg-btn" data-action="cancel" style="padding:12px 32px;border-radius:10px;background:rgba(255,255,255,0.08);border:2px solid rgba(255,255,255,0.12);color:white;font-size:16px;">Cancel</div>
+      </div>
+    </div>
+  `);
+  $('body').append($overlay);
+  updateCloseGameSelection();
+});
+
+function updateCloseGameSelection() {
+  $('.cg-btn').each(function(i) {
+    $(this).css({
+      outline: i === closeGameIdx ? '2px solid var(--theme-color)' : 'none',
+      transform: i === closeGameIdx ? 'scale(1.05)' : '',
+      boxShadow: i === closeGameIdx ? '0 0 16px rgba(20,180,19,0.4)' : '',
+    });
+  });
+}
+
+function navigateCloseGame(dir) {
+  if (dir === 'left' || dir === 'right') {
+    closeGameIdx = 1 - closeGameIdx;
+    updateCloseGameSelection();
+  }
+}
+
+function confirmCloseGame() {
+  const action = $('.cg-btn').eq(closeGameIdx).data('action');
+  $('#close-game-overlay').remove();
+  closeGameOpen = false;
+  if (action === 'close') {
+    ipcRenderer.send('kill-running-game');
+    notify('', `${_closeGameName} closed`);
+  } else {
+    ipcRenderer.send('quit-app');
+  }
+}
+
+function cancelCloseGame() {
+  $('#close-game-overlay').remove();
+  closeGameOpen = false;
+  ipcRenderer.send('quit-app');
 }
 
 function launchSelected() {
@@ -682,6 +841,11 @@ function launchSelected() {
   const $el = $(items[currentIndex]);
   const game = $el.data('game');
   if (game) {
+    if (game._resume) {
+      // Resume: just quit Patatin — listener will focus the game window
+      ipcRenderer.send('quit-app');
+      return;
+    }
     doLaunchGame(game);
     return;
   }

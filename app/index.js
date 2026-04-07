@@ -36,12 +36,23 @@ function createWindow() {
     }
   });
 
-  // If launched with --shutdown-overlay, tell renderer to show it
-  if (process.argv.includes('--shutdown-overlay')) {
-    mainWindow.webContents.on('did-finish-load', () => {
+  mainWindow.webContents.on('did-finish-load', () => {
+    // Pass running game info to renderer
+    const gameEnv = process.env.PATATIN_RUNNING_GAME;
+    if (gameEnv) {
+      try {
+        mainWindow.webContents.send('running-game', JSON.parse(gameEnv));
+      } catch {}
+    }
+    // Overlays triggered via CLI args
+    if (process.argv.includes('--shutdown-overlay')) {
       mainWindow.webContents.send('show-shutdown-overlay');
-    });
-  }
+    }
+    const closeIdx = process.argv.indexOf('--close-game-overlay');
+    if (closeIdx !== -1 && process.argv[closeIdx + 1]) {
+      mainWindow.webContents.send('show-close-game-overlay', process.argv[closeIdx + 1]);
+    }
+  });
 }
 
 // ===== YouTube TV =====
@@ -94,6 +105,33 @@ ipcMain.on('open-youtube', () => openYouTubeTV());
 ipcMain.on('close-youtube', () => closeYouTubeTV());
 ipcMain.on('launch-uri', (event, uri) => shell.openExternal(uri));
 
+// Game state management
+ipcMain.on('set-running-game', (event, game) => {
+  // Write game state so listener can pick it up
+  try { fs.writeFileSync('/tmp/patatin-game.json', JSON.stringify(game)); } catch {}
+});
+
+ipcMain.on('kill-running-game', () => {
+  try {
+    const state = JSON.parse(fs.readFileSync('/tmp/patatin-game.json', 'utf8'));
+    if (state.appId) {
+      exec(`pkill -f "AppId=${state.appId}"`);
+    }
+    if (state.pid) {
+      try { process.kill(state.pid, 'SIGTERM'); } catch {}
+    }
+    fs.unlinkSync('/tmp/patatin-game.json');
+  } catch {}
+});
+
+ipcMain.handle('check-running-game', () => {
+  try {
+    const state = JSON.parse(fs.readFileSync('/tmp/patatin-game.json', 'utf8'));
+    if (state.name) return state;
+  } catch {}
+  return null;
+});
+
 ipcMain.on('launch-exe', (event, exe) => {
   // Launch non-Steam games through Proton
   const gameName = path.basename(path.dirname(exe));
@@ -140,8 +178,10 @@ ipcMain.on('launch-exe', (event, exe) => {
     child.unref();
   }
 
-  // Quit Patatin after launching game
+  // Quit Patatin after launching non-Steam game
   setTimeout(() => app.quit(), 2000);
+  // Note: For Steam games (launch-uri), Patatin stays open briefly
+  // so the loading overlay is visible, then the listener kills it
 });
 
 

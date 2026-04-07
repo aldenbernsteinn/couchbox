@@ -55,9 +55,17 @@ const INPUT_EVENT_SIZE = 24;
 const EV_REL = 0x02;  // relative movement (mouse)
 const EV_KEY = 0x01;  // key/button press
 
+// Game state file — shared between listener and Electron
+const GAME_STATE_FILE = '/tmp/patatin-game.json';
+const LONG_PRESS_MS = 800;
+
 // Electron state
 let electronProc = null;
 let guideDown = false;
+let longPressTimer = null;
+
+// Running game state
+let runningGame = null; // { name, appId, platform, pid }
 
 // Mouse mode state
 let stickX = 0;
@@ -304,6 +312,139 @@ function sendToWhisper(cmd) {
   }
 }
 
+// ── Game tracking ───────────────────────────────────────────────────
+
+function writeGameState() {
+  try {
+    fs.writeFileSync(GAME_STATE_FILE, JSON.stringify(runningGame || {}));
+  } catch {}
+}
+
+function clearGameState() {
+  runningGame = null;
+  try { fs.unlinkSync(GAME_STATE_FILE); } catch {}
+}
+
+function isGameRunning() {
+  if (!runningGame || !runningGame.pid) return false;
+  try { process.kill(runningGame.pid, 0); return true; } catch { return false; }
+}
+
+function findGameProcess() {
+  // After Patatin exits (game launched), poll for game processes
+  // Steam games: look for reaper processes with the appId
+  // This runs a few times after Patatin quits to pick up the game PID
+  let attempts = 0;
+  const poll = () => {
+    if (attempts++ > 20 || electronProc) return; // stop if Patatin came back
+    execFile('pgrep', ['-f', 'SteamLaunch AppId='], { timeout: 2000 }, (err, stdout) => {
+      if (stdout && stdout.trim()) {
+        const pids = stdout.trim().split('\n');
+        if (pids.length > 0) {
+          const pid = parseInt(pids[0]);
+          if (pid && !isNaN(pid)) {
+            // Read the cmdline to find the appId
+            try {
+              const cmdline = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8');
+              const appIdMatch = cmdline.match(/AppId=(\d+)/);
+              if (appIdMatch && runningGame) {
+                runningGame.pid = pid;
+                writeGameState();
+                console.log(`Game PID found: ${pid} (AppId ${appIdMatch[1]})`);
+                startGameMonitor();
+                return;
+              }
+            } catch {}
+          }
+        }
+      }
+      setTimeout(poll, 1000);
+    });
+  };
+  setTimeout(poll, 2000);
+}
+
+let gameMonitorTimer = null;
+let savedWallpaper = null;
+
+function setBlackDesktop() {
+  // Save current wallpaper and set to solid black
+  execFile('gsettings', ['get', 'org.gnome.desktop.background', 'picture-uri-dark'], (err, stdout) => {
+    if (stdout) savedWallpaper = stdout.trim().replace(/'/g, '');
+    execFile('gsettings', ['set', 'org.gnome.desktop.background', 'picture-options', 'none'], () => {});
+    execFile('gsettings', ['set', 'org.gnome.desktop.background', 'primary-color', '#000000'], () => {});
+    execFile('gsettings', ['set', 'org.gnome.desktop.background', 'picture-uri-dark', ''], () => {});
+    execFile('gsettings', ['set', 'org.gnome.desktop.background', 'picture-uri', ''], () => {});
+    console.log('Desktop set to black');
+  });
+}
+
+function restoreDesktop() {
+  if (savedWallpaper) {
+    execFile('gsettings', ['set', 'org.gnome.desktop.background', 'picture-uri-dark', savedWallpaper], () => {});
+    execFile('gsettings', ['set', 'org.gnome.desktop.background', 'picture-uri', savedWallpaper], () => {});
+    execFile('gsettings', ['set', 'org.gnome.desktop.background', 'picture-options', 'zoom'], () => {});
+    console.log('Desktop wallpaper restored');
+    savedWallpaper = null;
+  }
+}
+
+function maximizeGameWindows(gameName) {
+  // Poll for new game windows and maximize them
+  let attempts = 0;
+  const poll = () => {
+    if (attempts++ > 40) return; // stop after 20s
+    execFile('xdotool', ['search', '--name', gameName], { timeout: 2000 }, (err, stdout) => {
+      if (stdout && stdout.trim()) {
+        const wids = stdout.trim().split('\n');
+        for (const wid of wids) {
+          execFile('wmctrl', ['-i', '-r', wid, '-b', 'add,maximized_vert,maximized_horz'], () => {});
+        }
+        console.log(`Maximized ${wids.length} window(s) for ${gameName}`);
+      } else {
+        setTimeout(poll, 500);
+      }
+    });
+  };
+  setTimeout(poll, 1000);
+}
+
+function startGameMonitor() {
+  if (gameMonitorTimer) return;
+  gameMonitorTimer = setInterval(() => {
+    if (!isGameRunning()) {
+      console.log(`Game "${runningGame?.name}" exited`);
+      clearGameState();
+      restoreDesktop();
+      showCursor();
+      clearInterval(gameMonitorTimer);
+      gameMonitorTimer = null;
+    }
+  }, 3000);
+}
+
+function killRunningGame() {
+  if (!runningGame) return;
+  console.log(`Killing game: ${runningGame.name}`);
+  restoreDesktop();
+  showCursor();
+  if (runningGame.appId) {
+    // For Steam games, use steam://close
+    execFile('xdotool', ['key', 'super+shift+h'], () => {}); // fallback
+    // Kill all processes with this appId
+    execFile('pkill', ['-f', `AppId=${runningGame.appId}`], () => {});
+  }
+  if (runningGame.pid) {
+    try { process.kill(runningGame.pid, 'SIGTERM'); } catch {}
+    setTimeout(() => {
+      try { process.kill(runningGame.pid, 'SIGKILL'); } catch {}
+    }, 3000);
+  }
+  clearGameState();
+  clearInterval(gameMonitorTimer);
+  gameMonitorTimer = null;
+}
+
 // ── Idle timeout ────────────────────────────────────────────────────
 
 function resetIdleTimer() {
@@ -481,20 +622,32 @@ function onRBButton(pressed) {
 let xRepeatTimer = null;
 
 function onXButton(pressed) {
-  if (!mouseModeActive || !keyboardProc) {
-    clearInterval(xRepeatTimer); clearTimeout(xRepeatTimer);
-    xRepeatTimer = null;
-    return;
-  }
-  if (pressed) {
-    resetIdleTimer();
-    sendToKeyboard('BACKSPACE');
-    xRepeatTimer = setTimeout(() => {
-      xRepeatTimer = setInterval(() => { sendToKeyboard('BACKSPACE'); }, 80);
-    }, 400);
+  if (!mouseModeActive) return;
+  if (keyboardProc) {
+    // Keyboard open: X = backspace with repeat
+    if (pressed) {
+      resetIdleTimer();
+      sendToKeyboard('BACKSPACE');
+      xRepeatTimer = setTimeout(() => {
+        xRepeatTimer = setInterval(() => { sendToKeyboard('BACKSPACE'); }, 80);
+      }, 400);
+    } else {
+      clearTimeout(xRepeatTimer); clearInterval(xRepeatTimer);
+      xRepeatTimer = null;
+    }
   } else {
-    clearTimeout(xRepeatTimer); clearInterval(xRepeatTimer);
-    xRepeatTimer = null;
+    // No keyboard: if focused on terminal, X = Shift+Tab
+    if (!pressed) return;
+    resetIdleTimer();
+    execFile('xdotool', ['getactivewindow'], (err, stdout) => {
+      if (!stdout) return;
+      const wid = stdout.trim();
+      execFile('xprop', ['-id', wid, 'WM_CLASS'], (err2, stdout2) => {
+        if (stdout2 && /terminal|konsole|alacritty|kitty|tilix|terminator/i.test(stdout2)) {
+          execFile('xdotool', ['key', 'shift+Tab'], () => {});
+        }
+      });
+    });
   }
 }
 
@@ -544,16 +697,33 @@ function onRightTrigger(value) {
   } else if (value < TRIGGER_THRESHOLD) { rtFired = false; }
 }
 
-// ── Guide button (unchanged logic) ─────────────────────────────────
+// ── Guide button — toggle game/Patatin, long press to close game ────
 
 function onGuideButton(pressed) {
   if (pressed) {
     guideDown = true;
+    longPressTimer = setTimeout(() => {
+      guideDown = false;
+      // Long press: close game overlay or shutdown overlay
+      if (runningGame && isGameRunning()) {
+        if (electronProc) killPatatin();
+        setTimeout(() => launchPatatin(['--close-game-overlay', runningGame.name]), 300);
+      } else {
+        if (electronProc) killPatatin();
+        setTimeout(() => launchPatatin(['--shutdown-overlay']), 300);
+      }
+    }, LONG_PRESS_MS);
   } else {
     if (guideDown) {
+      clearTimeout(longPressTimer);
       guideDown = false;
+      // Short press: toggle between game and Patatin
       if (electronProc) {
         killPatatin();
+        // If game is running, focus it
+        if (runningGame && isGameRunning()) {
+          execFile('wmctrl', ['-a', runningGame.name], () => {});
+        }
       } else {
         launchPatatin();
       }
@@ -582,13 +752,20 @@ function launchPatatin(args = []) {
   if (electronProc) return;
   stopMouseMode();
   console.log('Launching Patatin...');
-  electronProc = spawn(ELECTRON, [APP_DIR, ...args], {
-    env: { ...process.env, DISPLAY: process.env.DISPLAY || ':1' },
-    stdio: 'ignore',
-  });
+  // Pass game state info via env
+  const env = { ...process.env, DISPLAY: process.env.DISPLAY || ':1' };
+  if (runningGame) env.PATATIN_RUNNING_GAME = JSON.stringify(runningGame);
+  electronProc = spawn(ELECTRON, [APP_DIR, ...args], { env, stdio: 'ignore' });
   electronProc.on('exit', () => {
     console.log('Patatin exited');
     electronProc = null;
+    // If a game was just launched, set black desktop and find its process
+    if (runningGame && !runningGame.pid) {
+      setBlackDesktop();
+      hideCursor();
+      if (runningGame.name) maximizeGameWindows(runningGame.name);
+      findGameProcess();
+    }
   });
 }
 

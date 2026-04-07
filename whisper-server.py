@@ -14,7 +14,8 @@ sys.stderr.write("Loading Whisper small model...\n")
 sys.stderr.flush()
 from faster_whisper import WhisperModel
 import numpy as np
-model = WhisperModel("small", device="cuda", compute_type="float16")
+MODEL_SIZE = "medium"  # Options: tiny, base, small, medium, large
+model = WhisperModel(MODEL_SIZE, device="cuda", compute_type="float16")
 
 # Warm up CUDA kernels
 _tf = tempfile.NamedTemporaryFile(suffix='.wav', delete=False)
