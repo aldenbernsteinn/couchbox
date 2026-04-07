@@ -18,21 +18,19 @@
     top: 16px;
     right: 16px;
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 8px;
     color: white;
     font-size: 14px;
     opacity: 0;
     transition: opacity 0.3s;
     pointer-events: none;
-    max-width: 480px;
+    max-width: 600px;
   }
   #voice-overlay.visible { opacity: 1; }
   #voice-overlay .text {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    direction: rtl;
+    white-space: pre-wrap;
+    word-wrap: break-word;
     text-align: left;
   }
   .rec-dot { width: 8px; height: 8px; background: #f33; border-radius: 50%; animation: pulse 0.8s ease-in-out infinite; flex-shrink: 0; }

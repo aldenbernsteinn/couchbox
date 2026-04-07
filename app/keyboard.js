@@ -27,7 +27,7 @@ app.on('ready', () => {
 
   win = new BrowserWindow({
     x: Math.round((width - kbWidth) / 2),
-    y: height - kbHeight - 40,
+    y: height - kbHeight,
     width: kbWidth,
     height: kbHeight,
     frame: false,
@@ -46,6 +46,29 @@ app.on('ready', () => {
   win.loadFile(path.join(__dirname, 'keyboard.html'));
   win.setAlwaysOnTop(true, 'screen-saver');
   win.on('focus', () => win.blur());
+
+  // Position keyboard away from where the user is actually typing.
+  // Use the active window's bottom edge as the typing position estimate
+  // (terminals, chat apps, etc. have the cursor at the bottom).
+  // Fall back to mouse cursor position if window info unavailable.
+  execFile('xdotool', ['getactivewindow', 'getwindowgeometry', '--shell'], (err, wStdout) => {
+    let typingY = height - 100; // default: assume bottom
+    if (wStdout) {
+      const wyMatch = wStdout.match(/Y=(\d+)/);
+      const whMatch = wStdout.match(/HEIGHT=(\d+)/);
+      if (wyMatch && whMatch) {
+        const winY = parseInt(wyMatch[1]);
+        const winH = parseInt(whMatch[1]);
+        // Typing position = bottom of the active window
+        typingY = winY + winH;
+      }
+    }
+    // If typing position is in bottom half, put keyboard at top
+    if (typingY > height * 0.5) {
+      win.setPosition(Math.round((width - kbWidth) / 2), 20);
+    }
+    // Otherwise stays at bottom (default)
+  });
 
   win.webContents.on('did-finish-load', () => {
     rendererReady = true;

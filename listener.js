@@ -528,7 +528,7 @@ function onDpadY(value) {
 // ── Triggers (LT → Esc, RT → Enter) ────────────────────────────────
 
 function onLeftTrigger(value) {
-  if (!mouseModeActive || keyboardProc) return;
+  if (!mouseModeActive) return;
   if (value > TRIGGER_THRESHOLD && !ltFired) {
     ltFired = true; resetIdleTimer();
     execFile('xdotool', ['key', 'Escape'], () => {});
