@@ -694,4 +694,7 @@ function scan() {
 scan();
 setInterval(scan, 2000);
 
+// Reset cursor on startup in case a previous session left it big
+setCursor(CURSOR_THEME_NORMAL, CURSOR_SIZE_NORMAL);
+
 console.log('Patatin listener started. Press Xbox Guide to toggle UI. Joystick → mouse when hidden.');
