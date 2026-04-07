@@ -19,6 +19,10 @@ const JS_EVENT_INIT = 0x80;
 const GUIDE_BUTTON = 8;
 const BUTTON_A = 0;
 const BUTTON_B = 1;
+const BUTTON_X = 2;
+const BUTTON_Y = 3;
+const BUTTON_LB = 4;
+const BUTTON_RB = 5;
 const BUTTON_BACK = 6;
 const AXIS_LEFT_X = 0;
 const AXIS_LEFT_Y = 1;
@@ -36,7 +40,7 @@ const MOUSE_SPEED = 18;         // max pixels per tick at full deflection
 const SCROLL_SPEED = 3;         // scroll lines per tick at full deflection
 const MOUSE_TICK_MS = 16;       // ~60fps
 const CURSOR_POLL_MS = 150;     // check cursor shape every 150ms
-const IDLE_TIMEOUT_MS = 10000;  // deactivate after 10s of no input
+const IDLE_TIMEOUT_MS = 60000;  // deactivate after 60s of no input
 const TRIGGER_THRESHOLD = 16000; // trigger must be past ~50% to fire
 const DEFAULT_CURSORS = new Set(['left_ptr', 'default', 'arrow', 'top_left_arrow']);
 
@@ -79,6 +83,13 @@ let cursorPollTimer = null;
 // Keyboard overlay state
 let keyboardProc = null;
 let cursorHideProc = null;
+
+// Whisper server state
+const WHISPER_PYTHON = path.join(__dirname, 'tools', 'whisper-venv', 'bin', 'python3');
+const WHISPER_SERVER = path.join(__dirname, 'whisper-server.py');
+let whisperProc = null;
+let whisperReady = false;
+let voiceRecording = false;
 
 // ── Cursor helpers ──────────────────────────────────────────────────
 
@@ -231,6 +242,68 @@ function stopMouseWatch() {
   }
 }
 
+// ── Whisper server lifecycle ────────────────────────────────────────
+
+function startWhisper() {
+  if (whisperProc) return;
+  whisperReady = false;
+  console.log('Starting Whisper server (loading model into VRAM)...');
+  whisperProc = spawn(WHISPER_PYTHON, [WHISPER_SERVER], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  let wBuf = '';
+  whisperProc.stdout.on('data', (d) => {
+    wBuf += d.toString();
+    let lines = wBuf.split('\n');
+    wBuf = lines.pop();
+    for (const line of lines) {
+      if (line === 'READY') {
+        whisperReady = true;
+        console.log('Whisper model loaded and ready');
+      } else if (line === 'RECORDING' || line.startsWith('PARTIAL:')) {
+        sendToKeyboard(line);
+      } else if (line.startsWith('RESULT:')) {
+        voiceRecording = false;
+        const text = line.slice(7).trim();
+        if (text) {
+          sendToKeyboard('VOICE_STATE:writing');
+          execFile('xdotool', ['type', '--clearmodifiers', '--delay', '15', text], () => {
+            sendToKeyboard('VOICE_DONE');
+            resetIdleTimer();
+          });
+        } else {
+          sendToKeyboard('VOICE_DONE');
+        }
+      }
+    }
+  });
+  whisperProc.stderr.on('data', (d) => {
+    const msg = d.toString().trim();
+    if (msg) console.log(`[whisper] ${msg}`);
+  });
+  whisperProc.on('exit', () => {
+    console.log('Whisper server exited');
+    whisperProc = null;
+    whisperReady = false;
+  });
+}
+
+function stopWhisper() {
+  if (!whisperProc) return;
+  console.log('Stopping Whisper server (freeing VRAM)...');
+  if (whisperProc.stdin.writable) whisperProc.stdin.write('QUIT\n');
+  const pid = whisperProc.pid;
+  setTimeout(() => { try { process.kill(pid, 'SIGKILL'); } catch {} }, 3000);
+  whisperProc = null;
+  whisperReady = false;
+}
+
+function sendToWhisper(cmd) {
+  if (whisperProc && whisperReady && whisperProc.stdin.writable) {
+    whisperProc.stdin.write(cmd + '\n');
+  }
+}
+
 // ── Idle timeout ────────────────────────────────────────────────────
 
 function resetIdleTimer() {
@@ -260,6 +333,7 @@ function startMouseMode() {
   setCursor(CURSOR_THEME_BIG, CURSOR_SIZE_BIG);
   startMouseWatch();
   startCursorPoll();
+  startWhisper();
   resetIdleTimer();
   console.log('Mouse mode ON');
 }
@@ -278,6 +352,7 @@ function stopMouseMode() {
   setCursor(CURSOR_THEME_NORMAL, CURSOR_SIZE_NORMAL);
   stopMouseWatch();
   stopCursorPoll();
+  stopWhisper();
   if (aButtonDown) {
     execFile('xdotool', ['mouseup', '1'], () => {});
     aButtonDown = false;
@@ -320,18 +395,30 @@ function launchKeyboard() {
   hideCursor();
   keyboardProc = spawn(ELECTRON, [path.join(APP_DIR, 'keyboard.js')], {
     env: { ...process.env, DISPLAY: process.env.DISPLAY || ':1' },
-    stdio: 'ignore',
+    stdio: ['pipe', 'ignore', 'pipe'],
+  });
+  keyboardProc.stderr.on('data', (d) => {
+    const msg = d.toString().trim();
+    if (msg && !msg.includes('Gtk-WARNING')) console.log(`[keyboard] ${msg}`);
   });
   keyboardProc.on('exit', () => {
     console.log('Keyboard overlay exited');
     keyboardProc = null;
+    voiceRecording = false;
     showCursor();
   });
+}
+
+function sendToKeyboard(cmd) {
+  if (keyboardProc && keyboardProc.stdin && keyboardProc.stdin.writable) {
+    keyboardProc.stdin.write(cmd + '\n');
+  }
 }
 
 function killKeyboard() {
   if (!keyboardProc) return;
   console.log('Killing keyboard overlay...');
+  voiceRecording = false;
   showCursor();
   const pid = keyboardProc.pid;
   keyboardProc.kill('SIGTERM');
@@ -350,62 +437,111 @@ function onBButton(pressed) {
   }
 }
 
-// ── Back button (Super key) ─────────────────────────────────────────
+// ── Back button (⊙) — voice toggle when kb open, Super otherwise ──
 
 function onBackButton(pressed) {
   if (!mouseModeActive) return;
-  if (pressed) {
-    resetIdleTimer();
+  if (!pressed) return;
+  resetIdleTimer();
+  if (keyboardProc) {
+    if (!voiceRecording) {
+      voiceRecording = true;
+      clearTimeout(idleTimer); idleTimer = null;
+      sendToWhisper('RECORD');
+      sendToKeyboard('VOICE_STATE:recording');
+    } else {
+      voiceRecording = false;
+      resetIdleTimer();
+      sendToWhisper('STOP');
+      sendToKeyboard('VOICE_STATE:transcribing');
+    }
+  } else {
     execFile('xdotool', ['key', 'super'], () => {});
   }
 }
 
-// ── D-pad (arrow keys) ─────────────────────────────────────────────
+// ── LB / RB — move text cursor ─────────────────────────────────────
+
+function onLBButton(pressed) {
+  if (!mouseModeActive || !keyboardProc) return;
+  if (!pressed) return;
+  resetIdleTimer();
+  execFile('xdotool', ['key', 'Left'], () => {});
+}
+
+function onRBButton(pressed) {
+  if (!mouseModeActive || !keyboardProc) return;
+  if (!pressed) return;
+  resetIdleTimer();
+  execFile('xdotool', ['key', 'Right'], () => {});
+}
+
+// ── X button (backspace, hold to repeat) ────────────────────────────
+
+let xRepeatTimer = null;
+
+function onXButton(pressed) {
+  if (!mouseModeActive || !keyboardProc) {
+    clearInterval(xRepeatTimer); clearTimeout(xRepeatTimer);
+    xRepeatTimer = null;
+    return;
+  }
+  if (pressed) {
+    resetIdleTimer();
+    sendToKeyboard('BACKSPACE');
+    xRepeatTimer = setTimeout(() => {
+      xRepeatTimer = setInterval(() => { sendToKeyboard('BACKSPACE'); }, 80);
+    }, 400);
+  } else {
+    clearTimeout(xRepeatTimer); clearInterval(xRepeatTimer);
+    xRepeatTimer = null;
+  }
+}
+
+// ── Y button (space) ────────────────────────────────────────────────
+
+function onYButton(pressed) {
+  if (!mouseModeActive || !keyboardProc) return;
+  if (pressed) { resetIdleTimer(); sendToKeyboard('SPACE'); }
+}
+
+// ── D-pad (arrow keys — blocked when kb open) ───────────────────────
 
 function onDpadX(value) {
   if (!mouseModeActive) return;
   resetIdleTimer();
-  if (value === -32767 && dpadLastX !== -32767) {
-    execFile('xdotool', ['key', 'Left'], () => {});
-  } else if (value === 32767 && dpadLastX !== 32767) {
-    execFile('xdotool', ['key', 'Right'], () => {});
-  }
+  if (keyboardProc) { dpadLastX = value; return; }
+  if (value === -32767 && dpadLastX !== -32767) execFile('xdotool', ['key', 'Left'], () => {});
+  else if (value === 32767 && dpadLastX !== 32767) execFile('xdotool', ['key', 'Right'], () => {});
   dpadLastX = value;
 }
 
 function onDpadY(value) {
   if (!mouseModeActive) return;
   resetIdleTimer();
-  if (value === -32767 && dpadLastY !== -32767) {
-    execFile('xdotool', ['key', 'Up'], () => {});
-  } else if (value === 32767 && dpadLastY !== 32767) {
-    execFile('xdotool', ['key', 'Down'], () => {});
-  }
+  if (keyboardProc) { dpadLastY = value; return; }
+  if (value === -32767 && dpadLastY !== -32767) execFile('xdotool', ['key', 'Up'], () => {});
+  else if (value === 32767 && dpadLastY !== 32767) execFile('xdotool', ['key', 'Down'], () => {});
   dpadLastY = value;
 }
 
 // ── Triggers (LT → Esc, RT → Enter) ────────────────────────────────
 
 function onLeftTrigger(value) {
-  if (!mouseModeActive) return;
+  if (!mouseModeActive || keyboardProc) return;
   if (value > TRIGGER_THRESHOLD && !ltFired) {
-    ltFired = true;
-    resetIdleTimer();
+    ltFired = true; resetIdleTimer();
     execFile('xdotool', ['key', 'Escape'], () => {});
-  } else if (value < TRIGGER_THRESHOLD) {
-    ltFired = false;
-  }
+  } else if (value < TRIGGER_THRESHOLD) { ltFired = false; }
 }
 
 function onRightTrigger(value) {
   if (!mouseModeActive) return;
   if (value > TRIGGER_THRESHOLD && !rtFired) {
-    rtFired = true;
-    resetIdleTimer();
+    rtFired = true; resetIdleTimer();
     execFile('xdotool', ['key', 'Return'], () => {});
-  } else if (value < TRIGGER_THRESHOLD) {
-    rtFired = false;
-  }
+    if (keyboardProc) killKeyboard();
+  } else if (value < TRIGGER_THRESHOLD) { rtFired = false; }
 }
 
 // ── Guide button (unchanged logic) ─────────────────────────────────
@@ -501,6 +637,14 @@ function openDevice(jsPath) {
             onAButton(value === 1);
           } else if (number === BUTTON_B) {
             onBButton(value === 1);
+          } else if (number === BUTTON_X) {
+            onXButton(value === 1);
+          } else if (number === BUTTON_Y) {
+            onYButton(value === 1);
+          } else if (number === BUTTON_LB) {
+            onLBButton(value === 1);
+          } else if (number === BUTTON_RB) {
+            onRBButton(value === 1);
           } else if (number === BUTTON_BACK) {
             onBackButton(value === 1);
           }
