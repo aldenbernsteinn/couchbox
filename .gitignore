@@ -3,3 +3,4 @@ app/dist/
 *.log
 cache/
 references/
+tools/whisper-venv/
