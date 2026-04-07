@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: transparent;
+    font-family: 'Segoe UI Variable', 'Segoe UI', sans-serif;
+    user-select: none;
+    -webkit-app-region: no-drag;
+  }
+  #keyboard {
+    background: rgba(20, 20, 20, 0.92);
+    border-top: 2px solid rgba(255,255,255,0.1);
+    padding: 12px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: center;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+  }
+  .row {
+    display: flex;
+    gap: 5px;
+    justify-content: center;
+  }
+  .key {
+    min-width: 52px;
+    height: 52px;
+    background: rgba(255,255,255,0.08);
+    border: 2px solid rgba(255,255,255,0.12);
+    border-radius: 8px;
+    color: white;
+    font-size: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.1s, border-color 0.1s, transform 0.1s;
+  }
+  .key.selected {
+    background: rgba(20, 180, 19, 0.5);
+    border-color: #14b413;
+    transform: scale(1.08);
+    box-shadow: 0 0 16px rgba(20, 180, 19, 0.4);
+  }
+  .key.pressed {
+    background: #14b413;
+    transform: scale(0.95);
+  }
+  .key.wide { min-width: 80px; font-size: 14px; }
+  .key.space { min-width: 320px; }
+  .key.shift { min-width: 90px; font-size: 14px; }
+  .key.backspace { min-width: 90px; font-size: 14px; }
+  .key.enter { min-width: 100px; font-size: 14px; }
+  #preview {
+    color: rgba(255,255,255,0.5);
+    font-size: 14px;
+    height: 24px;
+    text-align: center;
+    padding: 2px 0;
+  }
+</style>
+</head>
+<body>
+<div id="keyboard">
+  <div id="preview"></div>
+  <!-- rows built by JS -->
+</div>
+<script>
+const { ipcRenderer } = require('electron');
+
+const ROWS_LOWER = [
+  ['1','2','3','4','5','6','7','8','9','0'],
+  ['q','w','e','r','t','y','u','i','o','p'],
+  ['a','s','d','f','g','h','j','k','l'],
+  ['Shift','z','x','c','v','b','n','m','Backspace'],
+  ['Tab','Space','Enter'],
+];
+
+const ROWS_UPPER = [
+  ['!','@','#','$','%','^','&','*','(',')'],
+  ['Q','W','E','R','T','Y','U','I','O','P'],
+  ['A','S','D','F','G','H','J','K','L'],
+  ['Shift','Z','X','C','V','B','N','M','Backspace'],
+  ['Tab','Space','Enter'],
+];
+
+let shifted = false;
+let selRow = 1;
+let selCol = 0;
+let keys = [];  // 2D array of DOM elements
+let navCooldown = false;
+
+function currentRows() { return shifted ? ROWS_UPPER : ROWS_LOWER; }
+
+function buildKeyboard() {
+  const kb = document.getElementById('keyboard');
+  // Remove old rows (keep preview)
+  const preview = document.getElementById('preview');
+  kb.innerHTML = '';
+  kb.appendChild(preview);
+  keys = [];
+  const rows = currentRows();
+  for (let r = 0; r < rows.length; r++) {
+    const rowDiv = document.createElement('div');
+    rowDiv.className = 'row';
+    keys[r] = [];
+    for (let c = 0; c < rows[r].length; c++) {
+      const label = rows[r][c];
+      const el = document.createElement('div');
+      el.className = 'key';
+      el.textContent = label;
+      if (label === 'Space') el.classList.add('space');
+      if (label === 'Shift') el.classList.add('shift');
+      if (label === 'Backspace') el.classList.add('backspace');
+      if (label === 'Enter') el.classList.add('enter');
+      if (label === 'Tab') el.classList.add('wide');
+      keys[r][c] = el;
+      rowDiv.appendChild(el);
+    }
+    kb.appendChild(rowDiv);
+  }
+  // Clamp selection
+  if (selRow >= keys.length) selRow = keys.length - 1;
+  if (selCol >= keys[selRow].length) selCol = keys[selRow].length - 1;
+  updateSelection();
+}
+
+function updateSelection() {
+  for (let r = 0; r < keys.length; r++) {
+    for (let c = 0; c < keys[r].length; c++) {
+      keys[r][c].classList.remove('selected');
+    }
+  }
+  keys[selRow][selCol].classList.add('selected');
+}
+
+function navigate(dr, dc) {
+  if (navCooldown) return;
+  selRow = Math.max(0, Math.min(keys.length - 1, selRow + dr));
+  selCol = Math.max(0, Math.min(keys[selRow].length - 1, selCol + dc));
+  updateSelection();
+  navCooldown = true;
+  setTimeout(() => { navCooldown = false; }, 150);
+}
+
+function pressSelected() {
+  const rows = currentRows();
+  const label = rows[selRow][selCol];
+  const el = keys[selRow][selCol];
+  el.classList.add('pressed');
+  setTimeout(() => el.classList.remove('pressed'), 120);
+
+  if (label === 'Shift') {
+    shifted = !shifted;
+    buildKeyboard();
+    return;
+  }
+  ipcRenderer.send('type-key', label);
+}
+
+// ── Gamepad polling ──────────────────────────────────────────────
+
+const STICK_THRESHOLD = 0.4;
+let stickHeld = { up: false, down: false, left: false, right: false };
+let aHeld = false;
+let bHeld = false;
+
+function pollGamepad() {
+  const gamepads = navigator.getGamepads();
+  let gp = null;
+  for (const g of gamepads) {
+    if (g && g.connected) { gp = g; break; }
+  }
+  if (!gp) return;
+
+  const lx = gp.axes[0] || 0;
+  const ly = gp.axes[1] || 0;
+
+  // D-pad buttons (indices 12-15 on standard mapping)
+  const dUp = gp.buttons[12] && gp.buttons[12].pressed;
+  const dDown = gp.buttons[13] && gp.buttons[13].pressed;
+  const dLeft = gp.buttons[14] && gp.buttons[14].pressed;
+  const dRight = gp.buttons[15] && gp.buttons[15].pressed;
+
+  const up = ly < -STICK_THRESHOLD || dUp;
+  const down = ly > STICK_THRESHOLD || dDown;
+  const left = lx < -STICK_THRESHOLD || dLeft;
+  const right = lx > STICK_THRESHOLD || dRight;
+
+  if (up && !stickHeld.up) navigate(-1, 0);
+  if (down && !stickHeld.down) navigate(1, 0);
+  if (left && !stickHeld.left) navigate(0, -1);
+  if (right && !stickHeld.right) navigate(0, 1);
+
+  stickHeld = { up, down, left, right };
+
+  // A button = type selected key
+  const aPressed = gp.buttons[0] && gp.buttons[0].pressed;
+  if (aPressed && !aHeld) pressSelected();
+  aHeld = aPressed;
+
+  // B button = close keyboard
+  const bPressed = gp.buttons[1] && gp.buttons[1].pressed;
+  if (bPressed && !bHeld) ipcRenderer.send('close-keyboard');
+  bHeld = bPressed;
+}
+
+setInterval(pollGamepad, 50);
+
+// ── Init ─────────────────────────────────────────────────────────
+buildKeyboard();
+</script>
+</body>
+</html>

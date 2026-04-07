@@ -1,22 +1,403 @@
 #!/usr/bin/env node
 // Patatin Listener — tiny service that waits for Xbox Guide button
 // Spawns/kills Electron on press. Zero overhead when UI is not shown.
+// When UI is hidden: left stick → mouse, right stick → scroll, A → click,
+// D-pad → arrow keys, RT → Enter, LT → Esc, Back → Super.
 
 const fs = require('fs');
-const { spawn } = require('child_process');
+const { spawn, execFile } = require('child_process');
 const path = require('path');
 
 const ELECTRON = path.join(__dirname, 'app', 'node_modules', 'electron', 'dist', 'electron');
 const APP_DIR = path.join(__dirname, 'app');
+
+// Joystick event constants (linux/joystick.h)
 const JS_EVENT_SIZE = 8;
 const JS_EVENT_BUTTON = 0x01;
+const JS_EVENT_AXIS = 0x02;
 const JS_EVENT_INIT = 0x80;
 const GUIDE_BUTTON = 8;
+const BUTTON_A = 0;
+const BUTTON_B = 1;
+const BUTTON_BACK = 6;
+const AXIS_LEFT_X = 0;
+const AXIS_LEFT_Y = 1;
+const AXIS_LT = 2;
+const AXIS_RIGHT_X = 3;
+const AXIS_RIGHT_Y = 4;
+const AXIS_RT = 5;
+const AXIS_DPAD_X = 6;
+const AXIS_DPAD_Y = 7;
 const LONG_PRESS_MS = 800;
 
+// Mouse mode settings
+const DEADZONE = 4000;          // ~12% of 32767, ignore stick drift
+const MOUSE_SPEED = 18;         // max pixels per tick at full deflection
+const SCROLL_SPEED = 3;         // scroll lines per tick at full deflection
+const MOUSE_TICK_MS = 16;       // ~60fps
+const IDLE_TIMEOUT_MS = 10000;  // deactivate after 10s of no input
+const TRIGGER_THRESHOLD = 16000; // trigger must be past ~50% to fire
+
+// Cursor settings
+const CURSOR_THEME_BIG = 'whiteglass';
+const CURSOR_SIZE_BIG = 64;
+const CURSOR_THEME_NORMAL = 'MacTahoe-cursors';
+const CURSOR_SIZE_NORMAL = 24;
+
+// Raw input_event struct (for real mouse detection): 24 bytes on x86_64
+const INPUT_EVENT_SIZE = 24;
+const EV_REL = 0x02;  // relative movement (mouse)
+const EV_KEY = 0x01;  // key/button press
+
+// Electron state
 let electronProc = null;
 let guideDown = false;
 let longPressTimer = null;
+
+// Mouse mode state
+let stickX = 0;
+let stickY = 0;
+let rStickX = 0;
+let rStickY = 0;
+let mouseModeActive = false;
+let mouseInterval = null;
+let aButtonDown = false;
+let idleTimer = null;
+let mouseWatchFd = null;
+
+// Trigger/dpad state (for edge detection)
+let ltFired = false;
+let rtFired = false;
+let dpadLastX = 0;
+let dpadLastY = 0;
+
+// Keyboard overlay state
+let keyboardProc = null;
+let cursorHideProc = null;
+
+// ── Cursor helpers ──────────────────────────────────────────────────
+
+function setCursor(theme, size) {
+  execFile('gsettings', ['set', 'org.gnome.desktop.interface', 'cursor-theme', theme], () => {});
+  execFile('gsettings', ['set', 'org.gnome.desktop.interface', 'cursor-size', String(size)], () => {});
+}
+
+function hideCursor() {
+  if (cursorHideProc) return;
+  cursorHideProc = spawn('python3', ['-c', [
+    'import ctypes, ctypes.util, signal, sys',
+    'signal.signal(signal.SIGTERM, lambda *a: sys.exit(0))',
+    'x11 = ctypes.cdll.LoadLibrary(ctypes.util.find_library("X11"))',
+    'xfixes = ctypes.cdll.LoadLibrary(ctypes.util.find_library("Xfixes"))',
+    'x11.XOpenDisplay.restype = ctypes.c_void_p',
+    'dpy = x11.XOpenDisplay(None)',
+    'root = x11.XDefaultRootWindow(dpy)',
+    'xfixes.XFixesHideCursor(dpy, root)',
+    'x11.XFlush(dpy)',
+    'signal.pause()',
+  ].join('\n')], { stdio: 'ignore' });
+  cursorHideProc.on('exit', () => { cursorHideProc = null; });
+}
+
+function showCursor() {
+  if (cursorHideProc) {
+    cursorHideProc.kill('SIGTERM');
+    cursorHideProc = null;
+  }
+}
+
+// ── Deadzone + velocity ─────────────────────────────────────────────
+
+function applyDeadzone(val) {
+  if (Math.abs(val) < DEADZONE) return 0;
+  const sign = val > 0 ? 1 : -1;
+  return sign * (Math.abs(val) - DEADZONE) / (32767 - DEADZONE);
+}
+
+function mouseMoveTick() {
+  // Left stick → mouse movement
+  const dx = applyDeadzone(stickX);
+  const dy = applyDeadzone(stickY);
+  if (dx !== 0 || dy !== 0) {
+    const moveX = Math.round(dx * MOUSE_SPEED);
+    const moveY = Math.round(dy * MOUSE_SPEED);
+    if (moveX !== 0 || moveY !== 0) {
+      execFile('xdotool', ['mousemove_relative', '--', String(moveX), String(moveY)], () => {});
+    }
+  }
+
+  // Right stick → scroll
+  const sy = applyDeadzone(rStickY);
+  if (sy !== 0) {
+    const lines = Math.round(Math.abs(sy) * SCROLL_SPEED);
+    // xdotool click 4 = scroll up, 5 = scroll down
+    const button = sy < 0 ? '4' : '5';
+    for (let i = 0; i < Math.max(1, lines); i++) {
+      execFile('xdotool', ['click', button], () => {});
+    }
+  }
+  const sx = applyDeadzone(rStickX);
+  if (sx !== 0) {
+    // xdotool click 6 = scroll left, 7 = scroll right
+    const button = sx < 0 ? '6' : '7';
+    const lines = Math.round(Math.abs(sx) * SCROLL_SPEED);
+    for (let i = 0; i < Math.max(1, lines); i++) {
+      execFile('xdotool', ['click', button], () => {});
+    }
+  }
+}
+
+// ── Real mouse/keyboard detection ───────────────────────────────────
+
+function findPhysicalMouse() {
+  try {
+    const entries = fs.readdirSync('/dev/input/by-id/');
+    for (const e of entries) {
+      if (e.endsWith('-event-mouse')) {
+        const target = fs.readlinkSync(`/dev/input/by-id/${e}`);
+        return path.resolve('/dev/input/by-id/', target);
+      }
+    }
+  } catch {}
+  return null;
+}
+
+function startMouseWatch() {
+  const devPath = findPhysicalMouse();
+  if (!devPath) return;
+  try {
+    const fd = fs.openSync(devPath, 'r');
+    mouseWatchFd = fd;
+    const buf = Buffer.alloc(INPUT_EVENT_SIZE);
+    const readLoop = () => {
+      if (mouseWatchFd !== fd) return;
+      fs.read(fd, buf, 0, INPUT_EVENT_SIZE, null, (err, bytesRead) => {
+        if (err || bytesRead !== INPUT_EVENT_SIZE) {
+          try { fs.closeSync(fd); } catch {}
+          if (mouseWatchFd === fd) mouseWatchFd = null;
+          return;
+        }
+        const type = buf.readUInt16LE(16);
+        if (type === EV_REL || type === EV_KEY) {
+          if (mouseModeActive) {
+            console.log('Real mouse/keyboard detected — deactivating mouse mode');
+            stopMouseMode();
+          }
+        }
+        readLoop();
+      });
+    };
+    readLoop();
+    console.log(`Watching real mouse at ${devPath}`);
+  } catch {}
+}
+
+function stopMouseWatch() {
+  if (mouseWatchFd !== null) {
+    try { fs.closeSync(mouseWatchFd); } catch {}
+    mouseWatchFd = null;
+  }
+}
+
+// ── Idle timeout ────────────────────────────────────────────────────
+
+function resetIdleTimer() {
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => {
+    if (mouseModeActive) {
+      console.log('Idle timeout — deactivating mouse mode');
+      stopMouseMode();
+    }
+  }, IDLE_TIMEOUT_MS);
+}
+
+// ── Mouse mode lifecycle ────────────────────────────────────────────
+
+function startMouseMode() {
+  if (mouseModeActive) return;
+  mouseModeActive = true;
+  stickX = 0;
+  stickY = 0;
+  rStickX = 0;
+  rStickY = 0;
+  ltFired = false;
+  rtFired = false;
+  dpadLastX = 0;
+  dpadLastY = 0;
+  mouseInterval = setInterval(mouseMoveTick, MOUSE_TICK_MS);
+  setCursor(CURSOR_THEME_BIG, CURSOR_SIZE_BIG);
+  startMouseWatch();
+  resetIdleTimer();
+  console.log('Mouse mode ON');
+}
+
+function stopMouseMode() {
+  if (!mouseModeActive) return;
+  mouseModeActive = false;
+  clearInterval(mouseInterval);
+  mouseInterval = null;
+  clearTimeout(idleTimer);
+  idleTimer = null;
+  stickX = 0;
+  stickY = 0;
+  rStickX = 0;
+  rStickY = 0;
+  setCursor(CURSOR_THEME_NORMAL, CURSOR_SIZE_NORMAL);
+  stopMouseWatch();
+  if (aButtonDown) {
+    execFile('xdotool', ['mouseup', '1'], () => {});
+    aButtonDown = false;
+  }
+  killKeyboard();
+  console.log('Mouse mode OFF');
+}
+
+// ── A button (click) ────────────────────────────────────────────────
+
+function onAButton(pressed) {
+  if (!mouseModeActive) return;
+  resetIdleTimer();
+  aButtonDown = pressed;
+  if (pressed) {
+    execFile('xdotool', ['mousedown', '1'], () => {
+      checkForTextField();
+    });
+  } else {
+    execFile('xdotool', ['mouseup', '1'], () => {});
+  }
+}
+
+// ── Text field detection ────────────────────────────────────────────
+
+function checkForTextField() {
+  const script = path.join(__dirname, 'check-textfield.py');
+  execFile('python3', [script], { timeout: 2000 }, (err, stdout) => {
+    if (stdout && stdout.trim() === 'TEXT' && mouseModeActive && !keyboardProc) {
+      launchKeyboard();
+    }
+  });
+}
+
+// ── Keyboard overlay ────────────────────────────────────────────────
+
+function launchKeyboard() {
+  if (keyboardProc) return;
+  console.log('Launching keyboard overlay...');
+  hideCursor();
+  keyboardProc = spawn(ELECTRON, [path.join(APP_DIR, 'keyboard.js')], {
+    env: { ...process.env, DISPLAY: process.env.DISPLAY || ':1' },
+    stdio: 'ignore',
+  });
+  keyboardProc.on('exit', () => {
+    console.log('Keyboard overlay exited');
+    keyboardProc = null;
+    showCursor();
+  });
+}
+
+function killKeyboard() {
+  if (!keyboardProc) return;
+  console.log('Killing keyboard overlay...');
+  showCursor();
+  const pid = keyboardProc.pid;
+  keyboardProc.kill('SIGTERM');
+  setTimeout(() => {
+    try { process.kill(pid, 'SIGKILL'); } catch {}
+  }, 2000);
+  keyboardProc = null;
+}
+
+// ── B button ────────────────────────────────────────────────────────
+
+function onBButton(pressed) {
+  if (!pressed) return;
+  if (keyboardProc) {
+    killKeyboard();
+  }
+}
+
+// ── Back button (Super key) ─────────────────────────────────────────
+
+function onBackButton(pressed) {
+  if (!mouseModeActive) return;
+  if (pressed) {
+    resetIdleTimer();
+    execFile('xdotool', ['key', 'super'], () => {});
+  }
+}
+
+// ── D-pad (arrow keys) ─────────────────────────────────────────────
+
+function onDpadX(value) {
+  if (!mouseModeActive) return;
+  resetIdleTimer();
+  if (value === -32767 && dpadLastX !== -32767) {
+    execFile('xdotool', ['key', 'Left'], () => {});
+  } else if (value === 32767 && dpadLastX !== 32767) {
+    execFile('xdotool', ['key', 'Right'], () => {});
+  }
+  dpadLastX = value;
+}
+
+function onDpadY(value) {
+  if (!mouseModeActive) return;
+  resetIdleTimer();
+  if (value === -32767 && dpadLastY !== -32767) {
+    execFile('xdotool', ['key', 'Up'], () => {});
+  } else if (value === 32767 && dpadLastY !== 32767) {
+    execFile('xdotool', ['key', 'Down'], () => {});
+  }
+  dpadLastY = value;
+}
+
+// ── Triggers (LT → Esc, RT → Enter) ────────────────────────────────
+
+function onLeftTrigger(value) {
+  if (!mouseModeActive) return;
+  if (value > TRIGGER_THRESHOLD && !ltFired) {
+    ltFired = true;
+    resetIdleTimer();
+    execFile('xdotool', ['key', 'Escape'], () => {});
+  } else if (value < TRIGGER_THRESHOLD) {
+    ltFired = false;
+  }
+}
+
+function onRightTrigger(value) {
+  if (!mouseModeActive) return;
+  if (value > TRIGGER_THRESHOLD && !rtFired) {
+    rtFired = true;
+    resetIdleTimer();
+    execFile('xdotool', ['key', 'Return'], () => {});
+  } else if (value < TRIGGER_THRESHOLD) {
+    rtFired = false;
+  }
+}
+
+// ── Guide button (unchanged logic) ─────────────────────────────────
+
+function onGuideButton(pressed) {
+  if (pressed) {
+    guideDown = true;
+    longPressTimer = setTimeout(() => {
+      guideDown = false;
+      if (electronProc) killPatatin();
+      setTimeout(() => launchPatatin(['--shutdown-overlay']), 300);
+    }, LONG_PRESS_MS);
+  } else {
+    if (guideDown) {
+      clearTimeout(longPressTimer);
+      guideDown = false;
+      if (electronProc) {
+        killPatatin();
+      } else {
+        launchPatatin();
+      }
+    }
+  }
+}
+
+// ── Electron lifecycle ──────────────────────────────────────────────
 
 function findXboxControllers() {
   try {
@@ -34,7 +415,8 @@ function findXboxControllers() {
 }
 
 function launchPatatin(args = []) {
-  if (electronProc) return; // already running
+  if (electronProc) return;
+  stopMouseMode();
   console.log('Launching Patatin...');
   electronProc = spawn(ELECTRON, [APP_DIR, ...args], {
     env: { ...process.env, DISPLAY: process.env.DISPLAY || ':1' },
@@ -50,7 +432,6 @@ function killPatatin() {
   if (!electronProc) return;
   console.log('Killing Patatin...');
   electronProc.kill('SIGTERM');
-  // Force kill after 2s if still alive
   const pid = electronProc.pid;
   setTimeout(() => {
     try { process.kill(pid, 'SIGKILL'); } catch {}
@@ -58,30 +439,8 @@ function killPatatin() {
   electronProc = null;
 }
 
-function onGuideButton(pressed) {
-  if (pressed) {
-    guideDown = true;
-    longPressTimer = setTimeout(() => {
-      // Long press — launch with shutdown overlay
-      guideDown = false;
-      if (electronProc) killPatatin();
-      setTimeout(() => launchPatatin(['--shutdown-overlay']), 300);
-    }, LONG_PRESS_MS);
-  } else {
-    if (guideDown) {
-      // Short press — toggle
-      clearTimeout(longPressTimer);
-      guideDown = false;
-      if (electronProc) {
-        killPatatin();
-      } else {
-        launchPatatin();
-      }
-    }
-  }
-}
+// ── Device reading ──────────────────────────────────────────────────
 
-// Open controller devices
 const devices = new Map();
 
 function openDevice(jsPath) {
@@ -104,8 +463,47 @@ function openDevice(jsPath) {
         const value = buf.readInt16LE(4);
         const type = buf.readUInt8(6);
         const number = buf.readUInt8(7);
-        if ((type & ~JS_EVENT_INIT) === JS_EVENT_BUTTON && number === GUIDE_BUTTON && !(type & JS_EVENT_INIT)) {
-          onGuideButton(value === 1);
+        const realType = type & ~JS_EVENT_INIT;
+        const isInit = !!(type & JS_EVENT_INIT);
+
+        if (realType === JS_EVENT_BUTTON && !isInit) {
+          if (number === GUIDE_BUTTON) {
+            onGuideButton(value === 1);
+          } else if (number === BUTTON_A) {
+            onAButton(value === 1);
+          } else if (number === BUTTON_B) {
+            onBButton(value === 1);
+          } else if (number === BUTTON_BACK) {
+            onBackButton(value === 1);
+          }
+        } else if (realType === JS_EVENT_AXIS && !isInit) {
+          if (number === AXIS_LEFT_X) {
+            stickX = value;
+            if (!mouseModeActive && !electronProc && Math.abs(value) > DEADZONE) {
+              startMouseMode();
+            }
+            if (mouseModeActive) resetIdleTimer();
+          } else if (number === AXIS_LEFT_Y) {
+            stickY = value;
+            if (!mouseModeActive && !electronProc && Math.abs(value) > DEADZONE) {
+              startMouseMode();
+            }
+            if (mouseModeActive) resetIdleTimer();
+          } else if (number === AXIS_RIGHT_X) {
+            rStickX = value;
+            if (mouseModeActive) resetIdleTimer();
+          } else if (number === AXIS_RIGHT_Y) {
+            rStickY = value;
+            if (mouseModeActive) resetIdleTimer();
+          } else if (number === AXIS_DPAD_X) {
+            onDpadX(value);
+          } else if (number === AXIS_DPAD_Y) {
+            onDpadY(value);
+          } else if (number === AXIS_LT) {
+            onLeftTrigger(value);
+          } else if (number === AXIS_RT) {
+            onRightTrigger(value);
+          }
         }
         readLoop();
       });
@@ -124,4 +522,4 @@ function scan() {
 scan();
 setInterval(scan, 2000);
 
-console.log('Patatin listener started. Press Xbox Guide to toggle UI.');
+console.log('Patatin listener started. Press Xbox Guide to toggle UI. Joystick → mouse when hidden.');
