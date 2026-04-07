@@ -1,5 +1,6 @@
 // Patatin — On-screen keyboard overlay (launched by listener.js)
-// Receives button commands from listener via stdin.
+// Fullscreen transparent click-through window.
+// Keyboard and voice overlay position themselves via CSS.
 
 const { app, BrowserWindow, ipcMain } = require('electron');
 const { execFile } = require('child_process');
@@ -21,15 +22,13 @@ function send(channel, data) {
 app.on('ready', () => {
   const { screen } = require('electron');
   const display = screen.getPrimaryDisplay();
-  const { width, height } = display.workAreaSize;
-  const kbWidth = 620;
-  const kbHeight = 340;
+  const { width, height } = display.size; // full display, not workArea
 
   win = new BrowserWindow({
-    x: Math.round((width - kbWidth) / 2),
-    y: height - kbHeight,
-    width: kbWidth,
-    height: kbHeight,
+    x: 0,
+    y: 0,
+    width: width,
+    height: height,
     frame: false,
     transparent: true,
     alwaysOnTop: true,
@@ -37,6 +36,7 @@ app.on('ready', () => {
     resizable: false,
     focusable: false,
     hasShadow: false,
+    type: 'toolbar', // prevents window manager from adding borders on Linux
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
@@ -45,35 +45,27 @@ app.on('ready', () => {
 
   win.loadFile(path.join(__dirname, 'keyboard.html'));
   win.setAlwaysOnTop(true, 'screen-saver');
+  win.setIgnoreMouseEvents(true); // click-through — all input via gamepad
   win.on('focus', () => win.blur());
 
-  // Position keyboard away from where the user is actually typing.
-  // Use the active window's bottom edge as the typing position estimate
-  // (terminals, chat apps, etc. have the cursor at the bottom).
-  // Fall back to mouse cursor position if window info unavailable.
+  // Tell renderer where the typing cursor is so keyboard can position away from it
   execFile('xdotool', ['getactivewindow', 'getwindowgeometry', '--shell'], (err, wStdout) => {
-    let typingY = height - 100; // default: assume bottom
+    let typingY = height - 100;
     if (wStdout) {
       const wyMatch = wStdout.match(/Y=(\d+)/);
       const whMatch = wStdout.match(/HEIGHT=(\d+)/);
       if (wyMatch && whMatch) {
-        const winY = parseInt(wyMatch[1]);
-        const winH = parseInt(whMatch[1]);
-        // Typing position = bottom of the active window
-        typingY = winY + winH;
+        typingY = parseInt(wyMatch[1]) + parseInt(whMatch[1]);
       }
     }
-    // If typing position is in bottom half, put keyboard at top
-    if (typingY > height * 0.5) {
-      win.setPosition(Math.round((width - kbWidth) / 2), 20);
-    }
-    // Otherwise stays at bottom (default)
-  });
-
-  win.webContents.on('did-finish-load', () => {
-    rendererReady = true;
-    for (const [ch, d] of pendingMessages) win.webContents.send(ch, d);
-    pendingMessages = [];
+    // Send to renderer so it can position keyboard
+    const kbPosition = typingY > height * 0.5 ? 'top' : 'bottom';
+    win.webContents.on('did-finish-load', () => {
+      rendererReady = true;
+      win.webContents.send('kb-position', kbPosition);
+      for (const [ch, d] of pendingMessages) win.webContents.send(ch, d);
+      pendingMessages = [];
+    });
   });
 
   // Read commands from listener via stdin

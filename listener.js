@@ -654,8 +654,22 @@ function onXButton(pressed) {
 // ── Y button (space) ────────────────────────────────────────────────
 
 function onYButton(pressed) {
-  if (!mouseModeActive || !keyboardProc) return;
-  if (pressed) { resetIdleTimer(); sendToKeyboard('SPACE'); }
+  if (!mouseModeActive) return;
+  if (!pressed) return;
+  resetIdleTimer();
+  if (keyboardProc) {
+    sendToKeyboard('SPACE');
+  } else {
+    // No keyboard: if focused on terminal, Y = type "git add -A && git commit && git push"
+    execFile('xdotool', ['getactivewindow'], (err, stdout) => {
+      if (!stdout) return;
+      execFile('xprop', ['-id', stdout.trim(), 'WM_CLASS'], (err2, stdout2) => {
+        if (stdout2 && /terminal|konsole|alacritty|kitty|tilix|terminator/i.test(stdout2)) {
+          execFile('xdotool', ['type', '--clearmodifiers', 'git add -A && git push'], () => {});
+        }
+      });
+    });
+  }
 }
 
 // ── D-pad (arrow keys — blocked when kb open) ───────────────────────
@@ -759,12 +773,15 @@ function launchPatatin(args = []) {
   electronProc.on('exit', () => {
     console.log('Patatin exited');
     electronProc = null;
-    // If a game was just launched, set black desktop and find its process
     if (runningGame && !runningGame.pid) {
+      // Game was just launched — set up game environment
       setBlackDesktop();
       hideCursor();
       if (runningGame.name) maximizeGameWindows(runningGame.name);
       findGameProcess();
+    } else if (!runningGame || !isGameRunning()) {
+      // No game running — return to mouse mode
+      startMouseMode();
     }
   });
 }

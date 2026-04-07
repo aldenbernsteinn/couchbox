@@ -5,27 +5,37 @@
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body {
-    background: transparent;
+    background: transparent !important;
     font-family: 'Segoe UI Variable', 'Segoe UI', sans-serif;
     user-select: none;
     -webkit-app-region: no-drag;
     overflow: hidden;
+    width: 100vw;
+    height: 100vh;
   }
 
-  /* ── Voice overlay (top-right, no box, single line) ──────────── */
+  /* ── Voice overlay (top-right corner of screen) ──────────────── */
   #voice-overlay {
     position: fixed;
-    top: 16px;
-    right: 16px;
+    top: 24px;
+    right: 24px;
     display: flex;
     align-items: flex-start;
-    gap: 8px;
+    gap: 10px;
     color: white;
-    font-size: 14px;
+    font-size: 15px;
+    line-height: 1.5;
     opacity: 0;
     transition: opacity 0.3s;
     pointer-events: none;
-    max-width: 600px;
+    max-width: 500px;
+    background: rgba(20, 20, 20, 0.85);
+    backdrop-filter: blur(30px) saturate(1.3);
+    -webkit-backdrop-filter: blur(30px) saturate(1.3);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 14px;
+    padding: 12px 16px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.05);
   }
   #voice-overlay.visible { opacity: 1; }
   #voice-overlay .text {
@@ -33,16 +43,20 @@
     word-wrap: break-word;
     text-align: left;
   }
-  .rec-dot { width: 8px; height: 8px; background: #f33; border-radius: 50%; animation: pulse 0.8s ease-in-out infinite; flex-shrink: 0; }
-  .cursor-blink { display: inline-block; width: 2px; height: 14px; background: #14b413; animation: blink 0.6s step-end infinite; flex-shrink: 0; }
-  .voice-hint { font-size: 10px; color: rgba(255,255,255,0.35); flex-shrink: 0; white-space: nowrap; }
+  .rec-dot { width: 8px; height: 8px; background: #f33; border-radius: 50%; animation: pulse 0.8s ease-in-out infinite; flex-shrink: 0; margin-top: 5px; }
+  .cursor-blink { display: inline-block; width: 2px; height: 16px; background: #14b413; animation: blink 0.6s step-end infinite; flex-shrink: 0; vertical-align: text-bottom; }
+  .voice-hint { font-size: 10px; color: rgba(255,255,255,0.35); flex-shrink: 0; white-space: nowrap; margin-top: 4px; }
   .writing-dots::after { content: ''; animation: dots 1.5s steps(3, end) infinite; }
   @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
   @keyframes dots { 0% { content: ''; } 33% { content: '.'; } 66% { content: '..'; } 100% { content: '...'; } }
 
-  /* ── Keyboard ────────────────────────────────────────────────── */
+  /* ── Keyboard (positioned via JS: bottom or top) ─────────────── */
   #keyboard {
+    position: fixed;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 620px;
     background: linear-gradient(135deg, rgba(28,28,28,0.96) 0%, rgba(38,38,38,0.94) 50%, rgba(28,28,28,0.96) 100%);
     border: 1px solid rgba(255,255,255,0.08);
     border-radius: 16px;
@@ -56,7 +70,12 @@
     box-shadow: 0 8px 32px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.06);
     transition: opacity 0.3s, transform 0.3s;
   }
-  #keyboard.hidden { opacity: 0; transform: translateY(20px); pointer-events: none; }
+  /* Default: bottom of screen */
+  #keyboard.pos-bottom { bottom: 20px; }
+  #keyboard.pos-top { top: 20px; }
+  #keyboard.hidden { opacity: 0; pointer-events: none; }
+  #keyboard.hidden.pos-bottom { transform: translateX(-50%) translateY(20px); }
+  #keyboard.hidden.pos-top { transform: translateX(-50%) translateY(-20px); }
   .row { display: flex; gap: 5px; justify-content: center; }
   .key {
     min-width: 52px; height: 52px;
@@ -108,9 +127,8 @@
 </head>
 <body>
 <div id="voice-overlay"></div>
-<div id="keyboard">
+<div id="keyboard" class="pos-bottom">
   <div id="preview"></div>
-  <!-- rows built by JS -->
   <div id="hints">
     <span class="hint"><span class="hb x">X</span> Bksp</span>
     <span class="hint"><span class="hb y">Y</span> Space</span>
@@ -127,7 +145,6 @@ const path = require('path');
 
 const MIC_SVG = '<svg class="mic-icon" viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1-9c0-.55.45-1 1-1s1 .45 1 1v6c0 .55-.45 1-1 1s-1-.45-1-1V5zm6 6c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>';
 
-// Xbox keyboard sounds
 const sndMove = new Audio(path.join(__dirname, 'sounds', 'key-move.mp3'));
 const sndPress = new Audio(path.join(__dirname, 'sounds', 'key-press.mp3'));
 sndMove.volume = 0.5;
@@ -146,7 +163,6 @@ const ROWS_LOWER = [
   ['Shift','z','x','c','v','b','n','m','Backspace'],
   ['Tab','MIC','Space','Enter'],
 ];
-
 const ROWS_UPPER = [
   ['!','@','#','$','%','^','&','*','(',')'],
   ['Q','W','E','R','T','Y','U','I','O','P'],
@@ -155,28 +171,31 @@ const ROWS_UPPER = [
   ['Tab','MIC','Space','Enter'],
 ];
 
-let shifted = false;
-let selRow = 1;
-let selCol = 0;
-let keys = [];
+let shifted = false, selRow = 1, selCol = 0, keys = [];
 let voiceActive = false;
+const kb = document.getElementById('keyboard');
+const vo = document.getElementById('voice-overlay');
+
+// Position keyboard based on where user is typing
+ipcRenderer.on('kb-position', (event, pos) => {
+  kb.classList.remove('pos-top', 'pos-bottom');
+  kb.classList.add(pos === 'top' ? 'pos-top' : 'pos-bottom');
+});
 
 function currentRows() { return shifted ? ROWS_UPPER : ROWS_LOWER; }
 
 function buildKeyboard() {
-  const kb = document.getElementById('keyboard');
   const preview = document.getElementById('preview');
   const hints = document.getElementById('hints');
-  // Remove only .row elements
   kb.querySelectorAll('.row').forEach(r => r.remove());
   keys = [];
-  const rows = currentRows();
-  for (let r = 0; r < rows.length; r++) {
+  const layout = currentRows();
+  for (let r = 0; r < layout.length; r++) {
     const rowDiv = document.createElement('div');
     rowDiv.className = 'row';
     keys[r] = [];
-    for (let c = 0; c < rows[r].length; c++) {
-      const label = rows[r][c];
+    for (let c = 0; c < layout[r].length; c++) {
+      const label = layout[r][c];
       const el = document.createElement('div');
       el.className = 'key';
       if (label === 'Backspace') {
@@ -208,11 +227,9 @@ function buildKeyboard() {
 }
 
 function updateSelection() {
-  for (let r = 0; r < keys.length; r++) {
-    for (let c = 0; c < keys[r].length; c++) {
+  for (let r = 0; r < keys.length; r++)
+    for (let c = 0; c < keys[r].length; c++)
       keys[r][c].classList.remove('selected');
-    }
-  }
   keys[selRow][selCol].classList.add('selected');
 }
 
@@ -220,37 +237,27 @@ function navigate(dr, dc) {
   const oldRow = selRow, oldCol = selCol;
   selRow = Math.max(0, Math.min(keys.length - 1, selRow + dr));
   selCol = Math.max(0, Math.min(keys[selRow].length - 1, selCol + dc));
-  if (selRow !== oldRow || selCol !== oldCol) {
-    playSound(sndMove);
-  }
+  if (selRow !== oldRow || selCol !== oldCol) playSound(sndMove);
   updateSelection();
 }
 
 function pressSelected() {
-  const rows = currentRows();
-  const label = rows[selRow][selCol];
+  const layout = currentRows();
+  const label = layout[selRow][selCol];
   const el = keys[selRow][selCol];
   el.classList.add('pressed');
   setTimeout(() => el.classList.remove('pressed'), 120);
   playSound(sndPress);
-
-  if (label === 'Shift') {
-    shifted = !shifted;
-    buildKeyboard();
-    return;
-  }
-  if (label === 'MIC') return; // handled by ⊙ button in listener
+  if (label === 'Shift') { shifted = !shifted; buildKeyboard(); return; }
+  if (label === 'MIC') return;
   ipcRenderer.send('type-key', label);
 }
-
-// ── Voice dictation UI ──────────────────────────────────────────
-
-const vo = document.getElementById('voice-overlay');
-const kb = document.getElementById('keyboard');
 
 function escapeHtml(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
+
+// ── Voice dictation UI ──────────────────────────────────────────
 
 function resetMicKey() {
   const mk = document.getElementById('mic-key');
@@ -277,7 +284,7 @@ ipcRenderer.on('voice-state', (event, state) => {
 ipcRenderer.on('voice-partial', (event, text) => {
   if (text) {
     vo.innerHTML = '<span class="rec-dot"></span> <span class="text">' +
-      escapeHtml(text) + '</span> <span class="cursor-blink"></span> <span class="voice-hint">⊙ stop</span>';
+      escapeHtml(text) + '</span><span class="cursor-blink"></span> <span class="voice-hint">⊙ stop</span>';
     vo.className = 'visible';
   }
 });
@@ -289,30 +296,24 @@ ipcRenderer.on('voice-done', () => {
   kb.classList.remove('hidden');
 });
 
-// ── Gamepad polling (navigation + A/B, rest handled by listener) ──
+// ── Gamepad polling ─────────────────────────────────────────────
 
 const STICK_THRESHOLD = 0.4;
 let stickHeld = { up: false, down: false, left: false, right: false };
-let aHeld = false;
-let bHeld = false;
+let aHeld = false, bHeld = false;
 
 function pollGamepad() {
   const gamepads = navigator.getGamepads();
   let gp = null;
-  for (const g of gamepads) {
-    if (g && g.connected) { gp = g; break; }
-  }
+  for (const g of gamepads) { if (g && g.connected) { gp = g; break; } }
   if (!gp) return;
 
   if (!voiceActive) {
-    const lx = gp.axes[0] || 0;
-    const ly = gp.axes[1] || 0;
-
+    const lx = gp.axes[0] || 0, ly = gp.axes[1] || 0;
     const dUp = gp.buttons[12] && gp.buttons[12].pressed;
     const dDown = gp.buttons[13] && gp.buttons[13].pressed;
     const dLeft = gp.buttons[14] && gp.buttons[14].pressed;
     const dRight = gp.buttons[15] && gp.buttons[15].pressed;
-
     const up = ly < -STICK_THRESHOLD || dUp;
     const down = ly > STICK_THRESHOLD || dDown;
     const left = lx < -STICK_THRESHOLD || dLeft;
@@ -322,7 +323,6 @@ function pollGamepad() {
     if (down && !stickHeld.down) navigate(1, 0);
     if (left && !stickHeld.left) navigate(0, -1);
     if (right && !stickHeld.right) navigate(0, 1);
-
     stickHeld = { up, down, left, right };
 
     const aPressed = gp.buttons[0] && gp.buttons[0].pressed;
@@ -336,8 +336,6 @@ function pollGamepad() {
 }
 
 setInterval(pollGamepad, 50);
-
-// ── Init ─────────────────────────────────────────────────────────
 buildKeyboard();
 </script>
 </body>
