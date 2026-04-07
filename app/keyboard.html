@@ -11,279 +11,298 @@
     -webkit-app-region: no-drag;
     overflow: hidden;
   }
-
-  /* ── Voice overlay (top-right, single line, no box) ──────────── */
-  #voice-overlay {
-    position: fixed;
-    top: 16px;
-    right: 16px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    color: white;
-    font-size: 14px;
-    opacity: 0;
-    transition: opacity 0.3s;
-    pointer-events: none;
-    max-width: 480px;
-  }
-  #voice-overlay.visible { opacity: 1; }
-  #voice-overlay .text {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    direction: rtl;
-    text-align: left;
-  }
-  .rec-dot {
-    width: 8px; height: 8px;
-    background: #f33;
-    border-radius: 50%;
-    animation: pulse 0.8s ease-in-out infinite;
-    flex-shrink: 0;
-  }
-  .cursor-blink {
-    display: inline-block;
-    width: 2px; height: 14px;
-    background: #14b413;
-    animation: blink 0.6s step-end infinite;
-    flex-shrink: 0;
-  }
-  .voice-hint {
-    font-size: 10px;
-    color: rgba(255,255,255,0.35);
-    flex-shrink: 0;
-    white-space: nowrap;
-  }
-  @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
-  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
-  .writing-dots::after { content: ''; animation: dots 1.5s steps(3, end) infinite; }
-  @keyframes dots { 0% { content: ''; } 33% { content: '.'; } 66% { content: '..'; } 100% { content: '...'; } }
-
-  /* ── Keyboard ────────────────────────────────────────────────── */
   #keyboard {
-    background: linear-gradient(135deg,
-      rgba(28, 28, 28, 0.96) 0%,
-      rgba(38, 38, 38, 0.94) 50%,
-      rgba(28, 28, 28, 0.96) 100%);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(20, 20, 20, 0.92);
+    border: 2px solid rgba(255,255,255,0.1);
     border-radius: 16px;
-    padding: 12px 18px 8px;
+    padding: 12px 20px;
     display: flex;
     flex-direction: column;
-    gap: 5px;
+    gap: 6px;
     align-items: center;
-    backdrop-filter: blur(40px) saturate(1.4);
-    -webkit-backdrop-filter: blur(40px) saturate(1.4);
-    box-shadow: 0 8px 32px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.06);
-    transition: opacity 0.3s, transform 0.3s;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
   }
-  #keyboard.hidden {
-    opacity: 0;
-    transform: translateY(20px);
-    pointer-events: none;
+  .row {
+    display: flex;
+    gap: 5px;
+    justify-content: center;
   }
-  .row { display: flex; gap: 4px; justify-content: center; }
   .key {
-    min-width: 50px; height: 46px;
-    background: rgba(255,255,255,0.06);
-    border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 9px;
-    color: rgba(255,255,255,0.9);
-    font-size: 17px;
-    display: flex; align-items: center; justify-content: center;
-    transition: all 0.08s;
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+    min-width: 52px;
+    height: 52px;
+    background: rgba(255,255,255,0.08);
+    border: 2px solid rgba(255,255,255,0.12);
+    border-radius: 8px;
+    color: white;
+    font-size: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.05s, border-color 0.05s, transform 0.05s;
   }
   .key.selected {
-    background: rgba(20, 180, 19, 0.35);
-    border-color: rgba(20, 180, 19, 0.6);
-    transform: scale(1.06);
-    box-shadow: 0 0 12px rgba(20,180,19,0.3), inset 0 1px 0 rgba(255,255,255,0.1);
+    background: rgba(20, 180, 19, 0.5);
+    border-color: #14b413;
+    transform: scale(1.08);
+    box-shadow: 0 0 16px rgba(20, 180, 19, 0.4);
   }
-  .key.pressed { background: rgba(20,180,19,0.7); transform: scale(0.95); }
-  .key.wide { min-width: 74px; font-size: 13px; }
-  .key.space { min-width: 290px; gap: 4px; }
-  .key.shift { min-width: 84px; font-size: 13px; }
-  .key.backspace { min-width: 84px; font-size: 13px; gap: 4px; }
-  .key.enter { min-width: 94px; font-size: 13px; gap: 4px; }
-  .key .bi {
-    display: inline-flex; align-items: center; justify-content: center;
-    width: 16px; height: 16px; border-radius: 50%;
-    font-size: 9px; font-weight: 700; color: white; flex-shrink: 0;
+  .key.pressed {
+    background: #14b413;
+    transform: scale(0.95);
   }
-  .bi.x { background: rgba(0,120,212,0.7); }
-  .bi.y { background: rgba(212,166,0,0.7); }
-  .bi.g { background: rgba(80,80,80,0.6); border-radius: 4px; font-size: 8px; }
-  .mic-icon { width: 14px; height: 14px; fill: rgba(255,255,255,0.8); flex-shrink: 0; }
+  .key.wide { min-width: 80px; font-size: 14px; }
+  .key.space { min-width: 320px; }
+  .key.shift { min-width: 90px; font-size: 14px; }
+  .key.backspace { min-width: 90px; font-size: 14px; gap: 4px; }
+  .key.enter { min-width: 100px; font-size: 14px; gap: 4px; }
+  .key .btn-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    font-size: 10px;
+    font-weight: 700;
+    color: white;
+    flex-shrink: 0;
+  }
+  .btn-icon.x { background: #0078d4; }
+  .btn-icon.y { background: #d4a600; }
+  #preview {
+    color: rgba(255,255,255,0.5);
+    font-size: 14px;
+    height: 24px;
+    text-align: center;
+    padding: 2px 0;
+  }
   #hints {
-    display: flex; gap: 12px; justify-content: center; padding: 5px 0 1px; flex-wrap: wrap;
+    display: flex;
+    gap: 16px;
+    justify-content: center;
+    padding: 6px 0 2px;
   }
-  .hint { display: flex; align-items: center; gap: 4px; color: rgba(255,255,255,0.3); font-size: 10px; }
-  .hb {
-    display: inline-flex; align-items: center; justify-content: center;
-    min-width: 17px; height: 17px; padding: 0 3px; border-radius: 50%;
-    font-size: 9px; font-weight: 700; color: rgba(255,255,255,0.7);
+  .hint {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: rgba(255,255,255,0.45);
+    font-size: 12px;
   }
-  .hb.x { background: rgba(0,120,212,0.4); }
-  .hb.y { background: rgba(212,166,0,0.4); }
-  .hb.b { background: rgba(196,43,28,0.4); }
-  .hb.g { background: rgba(80,80,80,0.5); border-radius: 4px; font-size: 8px; }
+  .hint-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    font-size: 11px;
+    font-weight: 700;
+    color: white;
+  }
+  .hint-btn.x { background: #0078d4; }
+  .hint-btn.y { background: #d4a600; }
+  .hint-btn.b { background: #c42b1c; }
 </style>
 </head>
 <body>
-<div id="voice-overlay"></div>
 <div id="keyboard">
+  <div id="preview"></div>
+  <!-- rows built by JS -->
   <div id="hints">
-    <span class="hint"><span class="hb x">X</span> Bksp</span>
-    <span class="hint"><span class="hb y">Y</span> Space</span>
-    <span class="hint"><span class="hb g">LB</span> ←</span>
-    <span class="hint"><span class="hb g">RB</span> →</span>
-    <span class="hint"><span class="hb g">⊙</span> Voice</span>
-    <span class="hint"><span class="hb g">RT</span> Enter</span>
-    <span class="hint"><span class="hb b">B</span> Close</span>
+    <span class="hint"><span class="hint-btn x">X</span> Backspace</span>
+    <span class="hint"><span class="hint-btn y">Y</span> Space</span>
+    <span class="hint"><span class="hint-btn b">B</span> Close</span>
   </div>
 </div>
 <script>
 const { ipcRenderer } = require('electron');
 const path = require('path');
-const MIC = '<svg class="mic-icon" viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1-9c0-.55.45-1 1-1s1 .45 1 1v6c0 .55-.45 1-1 1s-1-.45-1-1V5zm6 6c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>';
+
+// Xbox keyboard sounds
 const sndMove = new Audio(path.join(__dirname, 'sounds', 'key-move.mp3'));
 const sndPress = new Audio(path.join(__dirname, 'sounds', 'key-press.mp3'));
-sndMove.volume = 0.5; sndPress.volume = 0.7;
-function playSound(s) { const c = s.cloneNode(); c.volume = s.volume; c.play(); }
+sndMove.volume = 0.5;
+sndPress.volume = 0.7;
 
-const ROWS_LO = [
+function playSound(snd) {
+  const clone = snd.cloneNode();
+  clone.volume = snd.volume;
+  clone.play();
+}
+
+const ROWS_LOWER = [
   ['1','2','3','4','5','6','7','8','9','0'],
   ['q','w','e','r','t','y','u','i','o','p'],
   ['a','s','d','f','g','h','j','k','l'],
   ['Shift','z','x','c','v','b','n','m','Backspace'],
-  ['Tab','MIC','Space','Enter'],
+  ['Tab','Space','Enter'],
 ];
-const ROWS_HI = [
+
+const ROWS_UPPER = [
   ['!','@','#','$','%','^','&','*','(',')'],
   ['Q','W','E','R','T','Y','U','I','O','P'],
   ['A','S','D','F','G','H','J','K','L'],
   ['Shift','Z','X','C','V','B','N','M','Backspace'],
-  ['Tab','MIC','Space','Enter'],
+  ['Tab','Space','Enter'],
 ];
 
-let shifted = false, selRow = 1, selCol = 0, keys = [];
-let voiceActive = false;
-const kb = document.getElementById('keyboard');
-const vo = document.getElementById('voice-overlay');
+let shifted = false;
+let selRow = 1;
+let selCol = 0;
+let keys = [];
 
-function rows() { return shifted ? ROWS_HI : ROWS_LO; }
+function currentRows() { return shifted ? ROWS_UPPER : ROWS_LOWER; }
 
-function build() {
-  const hints = document.getElementById('hints');
-  kb.querySelectorAll('.row').forEach(r => r.remove());
+function buildKeyboard() {
+  const kb = document.getElementById('keyboard');
+  const preview = document.getElementById('preview');
+  kb.innerHTML = '';
+  kb.appendChild(preview);
   keys = [];
-  const layout = rows();
-  for (let r = 0; r < layout.length; r++) {
-    const rd = document.createElement('div'); rd.className = 'row'; keys[r] = [];
-    for (let c = 0; c < layout[r].length; c++) {
-      const l = layout[r][c], el = document.createElement('div'); el.className = 'key';
-      if (l === 'Backspace') { el.classList.add('backspace'); el.innerHTML = '<span class="bi x">X</span> ⌫'; }
-      else if (l === 'Space') { el.classList.add('space'); el.innerHTML = '<span class="bi y">Y</span> Space'; }
-      else if (l === 'Enter') { el.classList.add('enter'); el.innerHTML = '<span class="bi g">RT</span> ↵'; }
-      else if (l === 'MIC') { el.classList.add('wide'); el.innerHTML = '<span class="bi g">⊙</span> ' + MIC; el.id = 'mic-key'; }
-      else { el.textContent = l; }
-      if (l === 'Shift') el.classList.add('shift');
-      if (l === 'Tab') el.classList.add('wide');
-      keys[r][c] = el; rd.appendChild(el);
+  const rows = currentRows();
+  for (let r = 0; r < rows.length; r++) {
+    const rowDiv = document.createElement('div');
+    rowDiv.className = 'row';
+    keys[r] = [];
+    for (let c = 0; c < rows[r].length; c++) {
+      const label = rows[r][c];
+      const el = document.createElement('div');
+      el.className = 'key';
+      if (label === 'Backspace') {
+        el.classList.add('backspace');
+        el.innerHTML = '<span class="btn-icon x">X</span> ⌫';
+      } else if (label === 'Space') {
+        el.classList.add('space');
+        el.innerHTML = '<span class="btn-icon y">Y</span> Space';
+      } else {
+        el.textContent = label;
+      }
+      if (label === 'Shift') el.classList.add('shift');
+      if (label === 'Enter') el.classList.add('enter');
+      if (label === 'Tab') el.classList.add('wide');
+      keys[r][c] = el;
+      rowDiv.appendChild(el);
     }
-    kb.insertBefore(rd, hints);
+    kb.appendChild(rowDiv);
   }
   if (selRow >= keys.length) selRow = keys.length - 1;
   if (selCol >= keys[selRow].length) selCol = keys[selRow].length - 1;
-  upd();
+  updateSelection();
 }
 
-function upd() {
-  for (let r = 0; r < keys.length; r++) for (let c = 0; c < keys[r].length; c++) keys[r][c].classList.remove('selected');
+function updateSelection() {
+  for (let r = 0; r < keys.length; r++) {
+    for (let c = 0; c < keys[r].length; c++) {
+      keys[r][c].classList.remove('selected');
+    }
+  }
   keys[selRow][selCol].classList.add('selected');
 }
 
-function nav(dr, dc) {
-  const or = selRow, oc = selCol;
+function navigate(dr, dc) {
+  const oldRow = selRow, oldCol = selCol;
   selRow = Math.max(0, Math.min(keys.length - 1, selRow + dr));
   selCol = Math.max(0, Math.min(keys[selRow].length - 1, selCol + dc));
-  if (selRow !== or || selCol !== oc) playSound(sndMove);
-  upd();
+  if (selRow !== oldRow || selCol !== oldCol) {
+    playSound(sndMove);
+  }
+  updateSelection();
 }
 
-function press() {
-  const l = rows()[selRow][selCol], el = keys[selRow][selCol];
-  el.classList.add('pressed'); setTimeout(() => el.classList.remove('pressed'), 120);
+function pressSelected() {
+  const rows = currentRows();
+  const label = rows[selRow][selCol];
+  const el = keys[selRow][selCol];
+  el.classList.add('pressed');
+  setTimeout(() => el.classList.remove('pressed'), 120);
   playSound(sndPress);
-  if (l === 'Shift') { shifted = !shifted; build(); return; }
-  if (l === 'MIC') return;
-  ipcRenderer.send('type-key', l);
+
+  if (label === 'Shift') {
+    shifted = !shifted;
+    buildKeyboard();
+    return;
+  }
+  ipcRenderer.send('type-key', label);
 }
 
-function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+// ── Gamepad polling ──────────────────────────────────────────────
 
-// ── Voice UI ────────────────────────────────────────────────────
+const STICK_THRESHOLD = 0.4;
+let stickHeld = { up: false, down: false, left: false, right: false };
+let aHeld = false;
+let bHeld = false;
+let xHeld = false;
+let yHeld = false;
+let rtHeld = false;
 
-ipcRenderer.on('voice-state', (ev, state) => {
-  const mk = document.getElementById('mic-key');
-  if (state === 'recording') {
-    voiceActive = true;
-    kb.classList.add('hidden');
-    if (mk) { mk.style.background = 'rgba(200,30,30,0.3)'; mk.style.borderColor = 'rgba(255,60,60,0.4)'; }
-    vo.innerHTML = '<span class="rec-dot"></span> <span class="text" style="color:rgba(255,255,255,0.5)">Listening...</span> <span class="voice-hint">⊙ stop</span>';
-    vo.className = 'visible';
-  } else if (state === 'transcribing') {
-    if (mk) { mk.style.background = ''; mk.style.borderColor = ''; }
-    vo.innerHTML = '<span class="text" style="color:rgba(100,170,255,0.8)">Processing...</span> <span class="cursor-blink"></span>';
-  } else if (state === 'writing') {
-    if (mk) { mk.style.background = ''; mk.style.borderColor = ''; }
-    vo.innerHTML = '<span class="text" style="color:#14b413"><span class="writing-dots">Writing</span></span>';
+function pollGamepad() {
+  const gamepads = navigator.getGamepads();
+  let gp = null;
+  for (const g of gamepads) {
+    if (g && g.connected) { gp = g; break; }
   }
-});
+  if (!gp) return;
 
-ipcRenderer.on('voice-partial', (ev, text) => {
-  if (text) {
-    vo.innerHTML = '<span class="rec-dot"></span> <span class="text">' + esc(text) + '</span> <span class="cursor-blink"></span> <span class="voice-hint">⊙ stop</span>';
-    vo.className = 'visible';
+  const lx = gp.axes[0] || 0;
+  const ly = gp.axes[1] || 0;
+
+  const dUp = gp.buttons[12] && gp.buttons[12].pressed;
+  const dDown = gp.buttons[13] && gp.buttons[13].pressed;
+  const dLeft = gp.buttons[14] && gp.buttons[14].pressed;
+  const dRight = gp.buttons[15] && gp.buttons[15].pressed;
+
+  const up = ly < -STICK_THRESHOLD || dUp;
+  const down = ly > STICK_THRESHOLD || dDown;
+  const left = lx < -STICK_THRESHOLD || dLeft;
+  const right = lx > STICK_THRESHOLD || dRight;
+
+  if (up && !stickHeld.up) navigate(-1, 0);
+  if (down && !stickHeld.down) navigate(1, 0);
+  if (left && !stickHeld.left) navigate(0, -1);
+  if (right && !stickHeld.right) navigate(0, 1);
+
+  stickHeld = { up, down, left, right };
+
+  const aPressed = gp.buttons[0] && gp.buttons[0].pressed;
+  if (aPressed && !aHeld) pressSelected();
+  aHeld = aPressed;
+
+  const bPressed = gp.buttons[1] && gp.buttons[1].pressed;
+  if (bPressed && !bHeld) ipcRenderer.send('close-keyboard');
+  bHeld = bPressed;
+
+  // X = backspace hotkey
+  const xPressed = gp.buttons[2] && gp.buttons[2].pressed;
+  if (xPressed && !xHeld) {
+    playSound(sndPress);
+    ipcRenderer.send('type-key', 'Backspace');
   }
-});
+  xHeld = xPressed;
 
-ipcRenderer.on('voice-done', () => {
-  voiceActive = false;
-  vo.className = '';
-  kb.classList.remove('hidden');
-  const mk = document.getElementById('mic-key');
-  if (mk) { mk.style.background = ''; mk.style.borderColor = ''; }
-});
-
-// ── Gamepad polling (nav + A/B only) ────────────────────────────
-
-const TH = 0.4;
-let sh = { u:0, d:0, l:0, r:0 }, aH = 0, bH = 0;
-
-function poll() {
-  const gps = navigator.getGamepads(); let g = null;
-  for (const x of gps) { if (x && x.connected) { g = x; break; } }
-  if (!g) return;
-  if (!voiceActive) {
-    const lx = g.axes[0]||0, ly = g.axes[1]||0;
-    const du = g.buttons[12]&&g.buttons[12].pressed, dd = g.buttons[13]&&g.buttons[13].pressed;
-    const dl = g.buttons[14]&&g.buttons[14].pressed, dr = g.buttons[15]&&g.buttons[15].pressed;
-    const u = ly < -TH || du, d = ly > TH || dd, l = lx < -TH || dl, r = lx > TH || dr;
-    if (u && !sh.u) nav(-1,0); if (d && !sh.d) nav(1,0);
-    if (l && !sh.l) nav(0,-1); if (r && !sh.r) nav(0,1);
-    sh = {u,d,l,r};
-    const ap = g.buttons[0]&&g.buttons[0].pressed;
-    if (ap && !aH) press(); aH = ap;
+  // Y = space hotkey
+  const yPressed = gp.buttons[3] && gp.buttons[3].pressed;
+  if (yPressed && !yHeld) {
+    playSound(sndPress);
+    ipcRenderer.send('type-key', 'Space');
   }
-  const bp = g.buttons[1]&&g.buttons[1].pressed;
-  if (bp && !bH) ipcRenderer.send('close-keyboard'); bH = bp;
+  yHeld = yPressed;
+
+  // RT (axis 5 mapped as button index 7 in standard gamepad) = Enter + close
+  const rtVal = gp.buttons[7] && gp.buttons[7].value || 0;
+  const rtPressed = rtVal > 0.5;
+  if (rtPressed && !rtHeld) {
+    playSound(sndPress);
+    ipcRenderer.send('type-key', 'Enter');
+    setTimeout(() => ipcRenderer.send('close-keyboard'), 100);
+  }
+  rtHeld = rtPressed;
 }
 
-setInterval(poll, 50);
-build();
+setInterval(pollGamepad, 50);
+
+buildKeyboard();
 </script>
 </body>
 </html>
