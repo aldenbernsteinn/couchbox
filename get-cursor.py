@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Check if the current mouse cursor is a text/I-beam cursor. Prints TEXT or NONE."""
-import ctypes, ctypes.util, sys
+"""Print the current X11 cursor name. Used by listener.js for snap-to-interactive."""
+import ctypes, ctypes.util
 
 x11 = ctypes.cdll.LoadLibrary(ctypes.util.find_library('X11'))
 xfixes = ctypes.cdll.LoadLibrary(ctypes.util.find_library('Xfixes'))
@@ -20,15 +20,10 @@ class XFixesCursorImage(ctypes.Structure):
 xfixes.XFixesGetCursorImage.restype = ctypes.POINTER(XFixesCursorImage)
 
 dpy = x11.XOpenDisplay(None)
-if not dpy:
-    print('NONE')
-    sys.exit(0)
-
-img = xfixes.XFixesGetCursorImage(dpy)
-name = img.contents.name.decode('utf-8', errors='ignore').lower() if img.contents.name else ''
-x11.XCloseDisplay(dpy)
-
-if any(n in name for n in ('xterm', 'ibeam', 'text')):
-    print('TEXT')
+if dpy:
+    img = xfixes.XFixesGetCursorImage(dpy)
+    name = img.contents.name.decode('utf-8', errors='ignore') if img.contents.name else 'unknown'
+    print(name)
+    x11.XCloseDisplay(dpy)
 else:
-    print('NONE')
+    print('unknown')

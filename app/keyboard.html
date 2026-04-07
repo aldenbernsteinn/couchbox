@@ -54,8 +54,22 @@
   .key.wide { min-width: 80px; font-size: 14px; }
   .key.space { min-width: 320px; }
   .key.shift { min-width: 90px; font-size: 14px; }
-  .key.backspace { min-width: 90px; font-size: 14px; }
-  .key.enter { min-width: 100px; font-size: 14px; }
+  .key.backspace { min-width: 90px; font-size: 14px; gap: 4px; }
+  .key.enter { min-width: 100px; font-size: 14px; gap: 4px; }
+  .key .btn-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    font-size: 10px;
+    font-weight: 700;
+    color: white;
+    flex-shrink: 0;
+  }
+  .btn-icon.x { background: #0078d4; }
+  .btn-icon.y { background: #d4a600; }
   #preview {
     color: rgba(255,255,255,0.5);
     font-size: 14px;
@@ -156,10 +170,16 @@ function buildKeyboard() {
       const label = rows[r][c];
       const el = document.createElement('div');
       el.className = 'key';
-      el.textContent = label;
-      if (label === 'Space') el.classList.add('space');
+      if (label === 'Backspace') {
+        el.classList.add('backspace');
+        el.innerHTML = '<span class="btn-icon x">X</span> ⌫';
+      } else if (label === 'Space') {
+        el.classList.add('space');
+        el.innerHTML = '<span class="btn-icon y">Y</span> Space';
+      } else {
+        el.textContent = label;
+      }
       if (label === 'Shift') el.classList.add('shift');
-      if (label === 'Backspace') el.classList.add('backspace');
       if (label === 'Enter') el.classList.add('enter');
       if (label === 'Tab') el.classList.add('wide');
       keys[r][c] = el;

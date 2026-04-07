@@ -31,11 +31,14 @@ const AXIS_DPAD_Y = 7;
 
 // Mouse mode settings
 const DEADZONE = 4000;          // ~12% of 32767, ignore stick drift
+const STICKY_DEADZONE = 12000;  // ~37% — harder to break free when on interactive element
 const MOUSE_SPEED = 18;         // max pixels per tick at full deflection
 const SCROLL_SPEED = 3;         // scroll lines per tick at full deflection
 const MOUSE_TICK_MS = 16;       // ~60fps
+const CURSOR_POLL_MS = 150;     // check cursor shape every 150ms
 const IDLE_TIMEOUT_MS = 10000;  // deactivate after 10s of no input
 const TRIGGER_THRESHOLD = 16000; // trigger must be past ~50% to fire
+const DEFAULT_CURSORS = new Set(['left_ptr', 'default', 'arrow', 'top_left_arrow']);
 
 // Cursor settings
 const CURSOR_THEME_BIG = 'whiteglass';
@@ -68,6 +71,10 @@ let ltFired = false;
 let rtFired = false;
 let dpadLastX = 0;
 let dpadLastY = 0;
+
+// Cursor snap state
+let onInteractive = false;    // true when cursor is over a clickable/interactive element
+let cursorPollTimer = null;
 
 // Keyboard overlay state
 let keyboardProc = null;
@@ -104,21 +111,45 @@ function showCursor() {
   }
 }
 
+// ── Cursor shape polling (for snap-to-interactive) ──────────────────
+
+function pollCursorShape() {
+  const script = path.join(__dirname, 'get-cursor.py');
+  execFile('python3', [script], { timeout: 500 }, (err, stdout) => {
+    if (!stdout) return;
+    const name = stdout.trim().toLowerCase();
+    onInteractive = !DEFAULT_CURSORS.has(name);
+  });
+}
+
+function startCursorPoll() {
+  cursorPollTimer = setInterval(pollCursorShape, CURSOR_POLL_MS);
+}
+
+function stopCursorPoll() {
+  clearInterval(cursorPollTimer);
+  cursorPollTimer = null;
+  onInteractive = false;
+}
+
 // ── Deadzone + velocity ─────────────────────────────────────────────
 
-function applyDeadzone(val) {
-  if (Math.abs(val) < DEADZONE) return 0;
+function applyDeadzone(val, dz) {
+  if (Math.abs(val) < dz) return 0;
   const sign = val > 0 ? 1 : -1;
-  return sign * (Math.abs(val) - DEADZONE) / (32767 - DEADZONE);
+  return sign * (Math.abs(val) - dz) / (32767 - dz);
 }
 
 function mouseMoveTick() {
   // Don't move mouse when keyboard overlay is open (type mode)
   if (keyboardProc) return;
 
+  // Use sticky deadzone when over interactive element (harder to break free)
+  const dz = onInteractive ? STICKY_DEADZONE : DEADZONE;
+
   // Left stick → mouse movement
-  const dx = applyDeadzone(stickX);
-  const dy = applyDeadzone(stickY);
+  const dx = applyDeadzone(stickX, dz);
+  const dy = applyDeadzone(stickY, dz);
   if (dx !== 0 || dy !== 0) {
     const moveX = Math.round(dx * MOUSE_SPEED);
     const moveY = Math.round(dy * MOUSE_SPEED);
@@ -128,7 +159,7 @@ function mouseMoveTick() {
   }
 
   // Right stick → scroll
-  const sy = applyDeadzone(rStickY);
+  const sy = applyDeadzone(rStickY, DEADZONE);
   if (sy !== 0) {
     const lines = Math.round(Math.abs(sy) * SCROLL_SPEED);
     // xdotool click 4 = scroll up, 5 = scroll down
@@ -137,7 +168,7 @@ function mouseMoveTick() {
       execFile('xdotool', ['click', button], () => {});
     }
   }
-  const sx = applyDeadzone(rStickX);
+  const sx = applyDeadzone(rStickX, DEADZONE);
   if (sx !== 0) {
     // xdotool click 6 = scroll left, 7 = scroll right
     const button = sx < 0 ? '6' : '7';
@@ -228,6 +259,7 @@ function startMouseMode() {
   mouseInterval = setInterval(mouseMoveTick, MOUSE_TICK_MS);
   setCursor(CURSOR_THEME_BIG, CURSOR_SIZE_BIG);
   startMouseWatch();
+  startCursorPoll();
   resetIdleTimer();
   console.log('Mouse mode ON');
 }
@@ -245,6 +277,7 @@ function stopMouseMode() {
   rStickY = 0;
   setCursor(CURSOR_THEME_NORMAL, CURSOR_SIZE_NORMAL);
   stopMouseWatch();
+  stopCursorPoll();
   if (aButtonDown) {
     execFile('xdotool', ['mouseup', '1'], () => {});
     aButtonDown = false;
