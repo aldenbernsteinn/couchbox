@@ -24,6 +24,7 @@ const BUTTON_Y = 3;
 const BUTTON_LB = 4;
 const BUTTON_RB = 5;
 const BUTTON_BACK = 6;
+const BUTTON_START = 7;
 const AXIS_LEFT_X = 0;
 const AXIS_LEFT_Y = 1;
 const AXIS_LT = 2;
@@ -886,6 +887,10 @@ function openDevice(jsPath) {
             onRBButton(value === 1);
           } else if (number === BUTTON_BACK) {
             onBackButton(value === 1);
+          } else if (number === BUTTON_START) {
+            if (value === 1 && !electronProc && !runningGame) {
+              execFile('curl', ['-s', '-X', 'POST', 'http://localhost:8895/toggle'], () => {});
+            }
           }
         } else if (realType === JS_EVENT_AXIS && !isInit) {
           if (number === AXIS_LEFT_X) {
