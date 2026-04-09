@@ -587,6 +587,16 @@ function onBButton(pressed) {
   if (!pressed) return;
   if (keyboardProc) {
     killKeyboard();
+  } else if (mouseModeActive) {
+    // No keyboard: if focused on terminal, B = /clear
+    execFile('xdotool', ['getactivewindow'], (err, stdout) => {
+      if (!stdout) return;
+      execFile('xprop', ['-id', stdout.trim(), 'WM_CLASS'], (err2, stdout2) => {
+        if (stdout2 && /terminal|konsole|alacritty|kitty|tilix|terminator/i.test(stdout2)) {
+          execFile('xdotool', ['type', '--clearmodifiers', '/clear'], () => {});
+        }
+      });
+    });
   }
 }
 
@@ -657,7 +667,7 @@ function onXButton(pressed) {
       xWordDeleteTimer = null;
     }
   } else {
-    // No keyboard: if focused on terminal, X = type /clear
+    // No keyboard: if focused on terminal, X = Shift+Tab
     if (!pressed) return;
     resetIdleTimer();
     execFile('xdotool', ['getactivewindow'], (err, stdout) => {
@@ -665,7 +675,7 @@ function onXButton(pressed) {
       const wid = stdout.trim();
       execFile('xprop', ['-id', wid, 'WM_CLASS'], (err2, stdout2) => {
         if (stdout2 && /terminal|konsole|alacritty|kitty|tilix|terminator/i.test(stdout2)) {
-          execFile('xdotool', ['type', '--clearmodifiers', '/clear'], () => {});
+          execFile('xdotool', ['key', 'shift+Tab'], () => {});
         }
       });
     });
