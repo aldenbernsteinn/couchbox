@@ -196,6 +196,12 @@ function detectSteamGames() {
   return games;
 }
 
+// Overlay mounts: game dir name → local overlay path (writable via fuse-overlayfs)
+const OVERLAY_MOUNTS = {
+  'HogwartsLegacy': path.join(os.homedir(), 'Games', 'HogwartsLegacy'),
+  'Plants vs Zombies Garden Warfare 2': path.join(os.homedir(), 'Games', 'PvZGW2'),
+};
+
 function detectEAGames() {
   const games = [];
   const eaPaths = [
@@ -217,6 +223,14 @@ function detectEAGames() {
         if (exes.length > 0) eaExe = path.join(gamePath, exes[0]);
       } catch {}
 
+      // Remap exe to overlay mount so Proton writes go to writable layer
+      if (OVERLAY_MOUNTS[dir.name] && eaExe) {
+        const overlayBase = OVERLAY_MOUNTS[dir.name];
+        if (fs.existsSync(overlayBase)) {
+          eaExe = path.join(overlayBase, path.relative(gamePath, eaExe));
+        }
+      }
+
       games.push({
         name: dir.name, platform: 'ea', installed: true,
         compatibility: 'proton',
@@ -231,12 +245,6 @@ function detectEAGames() {
   }
   return games;
 }
-
-// Overlay mounts: game dir name → local overlay path (writable via fuse-overlayfs)
-const OVERLAY_MOUNTS = {
-  'HogwartsLegacy': path.join(os.homedir(), 'Games', 'HogwartsLegacy'),
-  'Plants vs Zombies Garden Warfare 2': path.join(os.homedir(), 'Games', 'PvZGW2'),
-};
 
 function detectBackupGames() {
   const games = [];
@@ -710,7 +718,10 @@ async function doLaunchGame(game) {
 
   if (game.platform === 'steam' && game.appId) {
     ipcRenderer.send('launch-uri', `steam://rungameid/${game.appId}`);
-    // Quit after showing loading for a bit — listener manages from here
+    setTimeout(() => ipcRenderer.send('quit-app'), 3000);
+  } else if (game.launcher === 'heroic') {
+    // Launch via Heroic Games Launcher (Epic games like Hogwarts Legacy)
+    ipcRenderer.send('launch-heroic', game.name);
     setTimeout(() => ipcRenderer.send('quit-app'), 3000);
   } else if (game.exe) {
     ipcRenderer.send('launch-exe', game.exe);

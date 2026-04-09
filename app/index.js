@@ -105,6 +105,17 @@ ipcMain.on('open-youtube', () => openYouTubeTV());
 ipcMain.on('close-youtube', () => closeYouTubeTV());
 ipcMain.on('launch-uri', (event, uri) => shell.openExternal(uri));
 
+ipcMain.on('launch-heroic', (event, gameName) => {
+  // Launch game via Heroic Games Launcher
+  // Heroic CLI: heroic --no-gui launch <app-name>
+  const child = spawn('heroic', ['--no-gui', 'launch', gameName], {
+    detached: true, stdio: 'ignore',
+    env: { ...process.env },
+  });
+  child.unref();
+  setTimeout(() => app.quit(), 3000);
+});
+
 // Game state management
 ipcMain.on('set-running-game', (event, game) => {
   // Write game state so listener can pick it up
