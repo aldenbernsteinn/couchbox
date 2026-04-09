@@ -98,6 +98,8 @@ const WHISPER_SERVER = path.join(__dirname, 'whisper-server.py');
 let whisperProc = null;
 let whisperReady = false;
 let voiceRecording = false;
+let writingLock = false;
+let writingLockTimer = null;
 
 // ── Cursor helpers ──────────────────────────────────────────────────
 
@@ -160,7 +162,7 @@ function applyDeadzone(val, dz) {
 }
 
 function mouseMoveTick() {
-  // Don't move mouse when keyboard overlay is open (type mode)
+  if (writingLock) return;
   if (keyboardProc) return;
 
   // Use sticky deadzone when over interactive element (harder to break free)
@@ -230,7 +232,7 @@ function startMouseWatch() {
         }
         const type = buf.readUInt16LE(16);
         if (type === EV_REL || type === EV_KEY) {
-          if (mouseModeActive) {
+          if (mouseModeActive && !writingLock) {
             console.log('Real mouse/keyboard detected — deactivating mouse mode');
             stopMouseMode();
           }
@@ -274,8 +276,14 @@ function startWhisper() {
         voiceRecording = false;
         const text = line.slice(7).trim();
         if (text) {
+          writingLock = true;
+          // Safety: auto-unlock after 30s in case xdotool hangs
+          clearTimeout(writingLockTimer);
+          writingLockTimer = setTimeout(() => { writingLock = false; }, 30000);
           sendToKeyboard('VOICE_STATE:writing');
           execFile('xdotool', ['type', '--clearmodifiers', '--delay', '15', text], () => {
+            writingLock = false;
+            clearTimeout(writingLockTimer);
             sendToKeyboard('VOICE_DONE');
             resetIdleTimer();
           });
@@ -536,11 +544,15 @@ function launchKeyboard() {
   hideCursor();
   keyboardProc = spawn(ELECTRON, [path.join(APP_DIR, 'keyboard.js')], {
     env: { ...process.env, DISPLAY: process.env.DISPLAY || ':1' },
-    stdio: ['pipe', 'ignore', 'pipe'],
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  keyboardProc.stdout.on('data', (d) => {
+    const msg = d.toString().trim();
+    if (msg) console.log(`[kb-out] ${msg}`);
   });
   keyboardProc.stderr.on('data', (d) => {
     const msg = d.toString().trim();
-    if (msg && !msg.includes('Gtk-WARNING')) console.log(`[keyboard] ${msg}`);
+    if (msg) console.log(`[kb-err] ${msg}`);
   });
   keyboardProc.on('exit', () => {
     console.log('Keyboard overlay exited');
@@ -620,23 +632,32 @@ function onRBButton(pressed) {
 // ── X button (backspace, hold to repeat) ────────────────────────────
 
 let xRepeatTimer = null;
+let xWordDeleteTimer = null;
 
 function onXButton(pressed) {
   if (!mouseModeActive) return;
   if (keyboardProc) {
-    // Keyboard open: X = backspace with repeat
+    // Keyboard open: X = backspace, hold = repeat, hold longer = word delete
     if (pressed) {
       resetIdleTimer();
       sendToKeyboard('BACKSPACE');
+      // After 400ms, start repeating single backspace
       xRepeatTimer = setTimeout(() => {
         xRepeatTimer = setInterval(() => { sendToKeyboard('BACKSPACE'); }, 80);
+        // After 1s more of holding, switch to word delete (Alt+Backspace)
+        xWordDeleteTimer = setTimeout(() => {
+          clearInterval(xRepeatTimer);
+          xRepeatTimer = setInterval(() => { sendToKeyboard('WORD_BACKSPACE'); }, 150);
+        }, 1000);
       }, 400);
     } else {
       clearTimeout(xRepeatTimer); clearInterval(xRepeatTimer);
+      clearTimeout(xWordDeleteTimer);
       xRepeatTimer = null;
+      xWordDeleteTimer = null;
     }
   } else {
-    // No keyboard: if focused on terminal, X = Shift+Tab
+    // No keyboard: if focused on terminal, X = type /clear
     if (!pressed) return;
     resetIdleTimer();
     execFile('xdotool', ['getactivewindow'], (err, stdout) => {
@@ -644,7 +665,7 @@ function onXButton(pressed) {
       const wid = stdout.trim();
       execFile('xprop', ['-id', wid, 'WM_CLASS'], (err2, stdout2) => {
         if (stdout2 && /terminal|konsole|alacritty|kitty|tilix|terminator/i.test(stdout2)) {
-          execFile('xdotool', ['key', 'shift+Tab'], () => {});
+          execFile('xdotool', ['type', '--clearmodifiers', '/clear'], () => {});
         }
       });
     });
@@ -698,7 +719,11 @@ function onLeftTrigger(value) {
   if (!mouseModeActive) return;
   if (value > TRIGGER_THRESHOLD && !ltFired) {
     ltFired = true; resetIdleTimer();
-    execFile('xdotool', ['key', 'Escape'], () => {});
+    if (keyboardProc) {
+      sendToKeyboard('TOGGLE_SYMBOLS');
+    } else {
+      execFile('xdotool', ['key', 'Escape'], () => {});
+    }
   } else if (value < TRIGGER_THRESHOLD) { ltFired = false; }
 }
 
@@ -823,6 +848,16 @@ function openDevice(jsPath) {
         const number = buf.readUInt8(7);
         const realType = type & ~JS_EVENT_INIT;
         const isInit = !!(type & JS_EVENT_INIT);
+
+        // Block non-essential input while transcription is being typed
+        // Always allow Guide button through so user can exit
+        if (writingLock && !isInit) {
+          if (realType === JS_EVENT_BUTTON && number === GUIDE_BUTTON) {
+            // Allow Guide through — user might need to exit
+          } else {
+            readLoop(); return;
+          }
+        }
 
         if (realType === JS_EVENT_BUTTON && !isInit) {
           if (number === GUIDE_BUTTON) {

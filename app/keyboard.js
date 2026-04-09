@@ -7,6 +7,9 @@ const { execFile } = require('child_process');
 const path = require('path');
 const readline = require('readline');
 
+// Allow audio playback in unfocused window (no user gesture required)
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+
 let win = null;
 let rendererReady = false;
 let pendingMessages = [];
@@ -75,7 +78,9 @@ app.on('ready', () => {
   rl.on('line', (line) => {
     const cmd = line.trim();
     if (cmd === 'BACKSPACE') execFile('xdotool', ['key', 'BackSpace'], () => {});
+    else if (cmd === 'WORD_BACKSPACE') execFile('xdotool', ['key', 'alt+BackSpace'], () => {});
     else if (cmd === 'SPACE') execFile('xdotool', ['key', 'space'], () => {});
+    else if (cmd === 'TOGGLE_SYMBOLS') send('toggle-symbols', '');
     else if (cmd.startsWith('VOICE_STATE:')) send('voice-state', cmd.slice(12));
     else if (cmd === 'RECORDING') send('voice-state', 'recording');
     else if (cmd.startsWith('PARTIAL:')) send('voice-partial', cmd.slice(8));
@@ -92,6 +97,23 @@ ipcMain.on('type-key', (event, key) => {
   else if (key === 'Tab') execFile('xdotool', ['key', 'Tab'], () => {});
   else execFile('xdotool', ['type', '--clearmodifiers', key], () => {});
 });
+
+// Sound playback from main process (renderer audio is unreliable in unfocused windows)
+const soundMove = path.join(__dirname, 'sounds', 'key-move.wav');
+const soundPress = path.join(__dirname, 'sounds', 'key-press.wav');
+
+const { spawn: spawnProc } = require('child_process');
+function playSoundFile(file) {
+  // Use ffplay for reliable audio - paplay may not connect to PulseAudio from Electron
+  const p = spawnProc('ffplay', ['-nodisp', '-autoexit', '-loglevel', 'quiet', file], {
+    stdio: 'ignore',
+    env: { ...process.env, PULSE_SERVER: 'unix:/run/user/1000/pulse/native' },
+  });
+  p.unref();
+}
+
+ipcMain.on('play-move', () => { console.error('[sound] move'); playSoundFile(soundMove); });
+ipcMain.on('play-press', () => { console.error('[sound] press'); playSoundFile(soundPress); });
 
 ipcMain.on('close-keyboard', () => app.quit());
 app.on('window-all-closed', () => app.quit());
