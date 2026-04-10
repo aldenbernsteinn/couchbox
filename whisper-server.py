@@ -103,7 +103,7 @@ for line in sys.stdin:
         tf.close()
         raw_file = tf.name
         rec_proc = subprocess.Popen(
-            ['arecord', '-D', 'hw:3,0', '-f', 'S16_LE', '-r', '16000', '-c', '1', '-t', 'raw', raw_file],
+            ['arecord', '-D', 'default', '-f', 'S16_LE', '-r', '16000', '-c', '1', '-t', 'raw', raw_file],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
         streaming = True

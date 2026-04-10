@@ -1,0 +1,14 @@
+[Unit]
+Description=Shared Whisper STT Server (Jarvis + Patatin)
+After=graphical-session.target
+
+[Service]
+ExecStart=/home/aldenb/Patatin/tools/whisper-venv/bin/python3 /home/aldenb/Patatin/whisper-http-server.py
+WorkingDirectory=/home/aldenb/Patatin
+Restart=always
+RestartSec=3
+Environment=WHISPER_PORT=8897
+Environment=WHISPER_MODEL_SIZE=medium
+
+[Install]
+WantedBy=default.target

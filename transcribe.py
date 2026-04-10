@@ -9,7 +9,7 @@ def record_audio():
     tf.close()
     # Start arecord in background
     proc = subprocess.Popen(
-        ['arecord', '-D', 'hw:3,0', '-f', 'S16_LE', '-r', '16000', '-c', '1', tf.name],
+        ['arecord', '-D', 'default', '-f', 'S16_LE', '-r', '16000', '-c', '1', tf.name],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
     )
     # Wait for STOP signal on stdin

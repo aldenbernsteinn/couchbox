@@ -105,12 +105,31 @@ ipcMain.on('open-youtube', () => openYouTubeTV());
 ipcMain.on('close-youtube', () => closeYouTubeTV());
 ipcMain.on('launch-uri', (event, uri) => shell.openExternal(uri));
 
-ipcMain.on('launch-heroic', (event, gameName) => {
-  // Launch game via Heroic Games Launcher
-  // Heroic CLI: heroic --no-gui launch <app-name>
-  const child = spawn('heroic', ['--no-gui', 'launch', gameName], {
-    detached: true, stdio: 'ignore',
-    env: { ...process.env },
+ipcMain.on('launch-heroic', (event, appId) => {
+  // Launch via legendary CLI + umu (handles Epic auth, Proton, prefix setup)
+  const legendaryBin = '/opt/Heroic/resources/app.asar.unpacked/build/bin/x64/linux/legendary';
+  const legendaryConfig = path.join(os.homedir(), '.config', 'heroic', 'legendaryConfig', 'legendary');
+  const umuRun = path.join(os.homedir(), '.config', 'heroic', 'tools', 'runtimes', 'umu', 'umu_run.py');
+  const protonPath = path.join(os.homedir(), '.steam', 'steam', 'steamapps', 'common', 'Proton - Experimental');
+  const prefixPath = path.join(os.homedir(), '.proton', 'hogwartslegacy');
+
+  const child = spawn(legendaryBin, [
+    'launch', appId, '--no-wine', '--wrapper', umuRun,
+  ], {
+    detached: true,
+    stdio: 'ignore',
+    env: {
+      ...process.env,
+      LEGENDARY_CONFIG_PATH: legendaryConfig,
+      STEAM_COMPAT_DATA_PATH: prefixPath,
+      STEAM_COMPAT_CLIENT_INSTALL_PATH: path.join(os.homedir(), '.steam', 'steam'),
+      PROTON_ENABLE_NVAPI: '1',
+      DXVK_ENABLE_NVAPI: '1',
+      DXVK_NVAPI_ALLOW_OTHER_DRIVERS: '1',
+      PROTONPATH: protonPath,
+      GAMEID: 'umu-990080',
+      STORE: 'egs',
+    },
   });
   child.unref();
   setTimeout(() => app.quit(), 3000);

@@ -289,7 +289,8 @@ function detectBackupGames() {
       if (gameName.includes('Hogwarts')) {
         art = 'https://cdn.cloudflare.steamstatic.com/steam/apps/990080/library_600x900.jpg';
         hero = 'https://cdn.cloudflare.steamstatic.com/steam/apps/990080/library_hero.jpg';
-        launcher = 'proton';
+        launcher = 'heroic';
+        epicAppId = 'fa4240e57a3c46b39f169041b7811293';
       } else if (gameName.toLowerCase().includes('rocket')) {
         art = 'https://cdn.cloudflare.steamstatic.com/steam/apps/252950/library_600x900.jpg';
         hero = 'https://cdn.cloudflare.steamstatic.com/steam/apps/252950/library_hero.jpg';
@@ -719,9 +720,9 @@ async function doLaunchGame(game) {
   if (game.platform === 'steam' && game.appId) {
     ipcRenderer.send('launch-uri', `steam://rungameid/${game.appId}`);
     setTimeout(() => ipcRenderer.send('quit-app'), 3000);
-  } else if (game.launcher === 'heroic') {
-    // Launch via Heroic Games Launcher (Epic games like Hogwarts Legacy)
-    ipcRenderer.send('launch-heroic', game.name);
+  } else if (game.launcher === 'heroic' && game.epicAppId) {
+    // Launch via Heroic/legendary (Epic games like Hogwarts Legacy)
+    ipcRenderer.send('launch-heroic', game.epicAppId);
     setTimeout(() => ipcRenderer.send('quit-app'), 3000);
   } else if (game.exe) {
     ipcRenderer.send('launch-exe', game.exe);
