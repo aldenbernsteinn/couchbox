@@ -93,13 +93,14 @@ let cursorPollTimer = null;
 let keyboardProc = null;
 let cursorHideProc = null;
 
-// Whisper — shared HTTP server on :8897 (whisper.service)
-const WHISPER_URL = 'http://localhost:8897';
+// Whisper server state
+const WHISPER_PYTHON = path.join(__dirname, 'tools', 'whisper-venv', 'bin', 'python3');
+const WHISPER_SERVER = path.join(__dirname, 'whisper-server.py');
+let whisperProc = null;
 let whisperReady = false;
 let voiceRecording = false;
 let writingLock = false;
 let writingLockTimer = null;
-let whisperWs = null;
 
 // ── Cursor helpers ──────────────────────────────────────────────────
 
@@ -255,94 +256,69 @@ function stopMouseWatch() {
 // ── Whisper server lifecycle ────────────────────────────────────────
 
 function startWhisper() {
-  // Connect to shared Whisper HTTP server on :8897 (whisper.service)
-  if (whisperWs) return;
-  console.log('Connecting to shared Whisper server on :8897...');
-
-  const http = require('http');
-  http.get(`${WHISPER_URL}/status`, (res) => {
-    let body = '';
-    res.on('data', d => body += d);
-    res.on('end', () => {
-      try {
-        const data = JSON.parse(body);
-        whisperReady = data.ready;
-        console.log(`Whisper shared server: ready=${whisperReady}`);
-      } catch {}
-    });
-  }).on('error', () => {
-    console.log('Whisper shared server not reachable — is whisper.service running?');
+  if (whisperProc) return;
+  whisperReady = false;
+  console.log('Starting Whisper server (loading model into VRAM)...');
+  whisperProc = spawn(WHISPER_PYTHON, [WHISPER_SERVER], {
+    stdio: ['pipe', 'pipe', 'pipe'],
   });
-
-  // Connect WebSocket for streaming partials
-  try {
-    const WebSocket = require('ws');
-    whisperWs = new WebSocket('ws://localhost:8897/ws');
-
-    whisperWs.on('open', () => {
-      whisperReady = true;
-      console.log('Whisper WebSocket connected');
-    });
-
-    whisperWs.on('message', (data) => {
-      try {
-        const msg = JSON.parse(data.toString());
-        console.log(`[whisper-ws] ${msg.type}: ${msg.text ? msg.text.slice(0, 50) : msg.active ?? ''}`);
-        if (msg.type === 'partial') {
-          sendToKeyboard(`PARTIAL:${msg.text}`);
-        } else if (msg.type === 'recording' && msg.active) {
-          sendToKeyboard('RECORDING');
-        } else if (msg.type === 'result') {
-          voiceRecording = false;
-          const text = (msg.text || '').trim();
-          if (text) {
-            writingLock = true;
+  let wBuf = '';
+  whisperProc.stdout.on('data', (d) => {
+    wBuf += d.toString();
+    let lines = wBuf.split('\n');
+    wBuf = lines.pop();
+    for (const line of lines) {
+      if (line === 'READY') {
+        whisperReady = true;
+        console.log('Whisper model loaded and ready');
+      } else if (line === 'RECORDING' || line.startsWith('PARTIAL:')) {
+        sendToKeyboard(line);
+      } else if (line.startsWith('RESULT:')) {
+        voiceRecording = false;
+        const text = line.slice(7).trim();
+        if (text) {
+          writingLock = true;
+          // Safety: auto-unlock after 30s in case xdotool hangs
+          clearTimeout(writingLockTimer);
+          writingLockTimer = setTimeout(() => { writingLock = false; }, 30000);
+          sendToKeyboard('VOICE_STATE:writing');
+          execFile('xdotool', ['type', '--clearmodifiers', '--delay', '15', text], () => {
+            writingLock = false;
             clearTimeout(writingLockTimer);
-            writingLockTimer = setTimeout(() => { writingLock = false; }, 30000);
-            sendToKeyboard('VOICE_STATE:writing');
-            execFile('xdotool', ['type', '--clearmodifiers', '--delay', '15', text], () => {
-              writingLock = false;
-              clearTimeout(writingLockTimer);
-              sendToKeyboard('VOICE_DONE');
-              resetIdleTimer();
-            });
-          } else {
             sendToKeyboard('VOICE_DONE');
-          }
+            resetIdleTimer();
+          });
+        } else {
+          sendToKeyboard('VOICE_DONE');
         }
-      } catch {}
-    });
-
-    whisperWs.on('close', () => {
-      console.log('Whisper WebSocket disconnected');
-      whisperWs = null;
-      whisperReady = false;
-    });
-
-    whisperWs.on('error', (e) => { console.log(`[whisper-ws] error: ${e.message}`); });
-  } catch (e) {
-    console.log(`Whisper WebSocket error: ${e.message}`);
-  }
+      }
+    }
+  });
+  whisperProc.stderr.on('data', (d) => {
+    const msg = d.toString().trim();
+    if (msg) console.log(`[whisper] ${msg}`);
+  });
+  whisperProc.on('exit', () => {
+    console.log('Whisper server exited');
+    whisperProc = null;
+    whisperReady = false;
+  });
 }
 
 function stopWhisper() {
-  if (whisperWs) {
-    whisperWs.close();
-    whisperWs = null;
-  }
+  if (!whisperProc) return;
+  console.log('Stopping Whisper server (freeing VRAM)...');
+  if (whisperProc.stdin.writable) whisperProc.stdin.write('QUIT\n');
+  const pid = whisperProc.pid;
+  setTimeout(() => { try { process.kill(pid, 'SIGKILL'); } catch {} }, 3000);
+  whisperProc = null;
   whisperReady = false;
 }
 
 function sendToWhisper(cmd) {
-  console.log(`[whisper] sendToWhisper(${cmd}) ready=${whisperReady} ws=${!!whisperWs}`);
-  if (!whisperReady) return;
-  // Map old stdin commands to HTTP endpoints
-  const endpoint = cmd === 'RECORD' ? 'record' : cmd === 'STOP' ? 'stop' : null;
-  if (!endpoint) return;
-  const http = require('http');
-  const req = http.request(`${WHISPER_URL}/${endpoint}`, { method: 'POST', timeout: 5000 });
-  req.on('error', () => {});
-  req.end();
+  if (whisperProc && whisperReady && whisperProc.stdin.writable) {
+    whisperProc.stdin.write(cmd + '\n');
+  }
 }
 
 // ── Game tracking ───────────────────────────────────────────────────
@@ -366,21 +342,27 @@ function isGameRunning() {
 function findGameProcess() {
   // After Patatin exits (game launched), poll for game processes
   // Steam games: look for reaper processes with the appId
-  // This runs a few times after Patatin quits to pick up the game PID
+  // Non-Steam (Heroic/Epic): look for the game exe name under Proton
+  const isSteam = runningGame && runningGame.appId;
+  const searchPattern = isSteam
+    ? 'SteamLaunch AppId='
+    : (runningGame && (runningGame.exeName || runningGame.name));
+
+  if (!searchPattern) return;
+
   let attempts = 0;
   const poll = () => {
-    if (attempts++ > 20 || electronProc) return; // stop if Patatin came back
-    execFile('pgrep', ['-f', 'SteamLaunch AppId='], { timeout: 2000 }, (err, stdout) => {
+    if (attempts++ > 30 || electronProc) return; // stop if Patatin came back
+    execFile('pgrep', ['-f', searchPattern], { timeout: 2000 }, (err, stdout) => {
       if (stdout && stdout.trim()) {
         const pids = stdout.trim().split('\n');
-        if (pids.length > 0) {
-          const pid = parseInt(pids[0]);
-          if (pid && !isNaN(pid)) {
-            // Read the cmdline to find the appId
+        const pid = parseInt(pids[0]);
+        if (pid && !isNaN(pid) && runningGame) {
+          if (isSteam) {
             try {
               const cmdline = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8');
               const appIdMatch = cmdline.match(/AppId=(\d+)/);
-              if (appIdMatch && runningGame) {
+              if (appIdMatch) {
                 runningGame.pid = pid;
                 writeGameState();
                 console.log(`Game PID found: ${pid} (AppId ${appIdMatch[1]})`);
@@ -388,6 +370,12 @@ function findGameProcess() {
                 return;
               }
             } catch {}
+          } else {
+            runningGame.pid = pid;
+            writeGameState();
+            console.log(`Game PID found: ${pid} (${searchPattern})`);
+            startGameMonitor();
+            return;
           }
         }
       }
@@ -912,17 +900,9 @@ function openDevice(jsPath) {
           } else if (number === BUTTON_BACK) {
             onBackButton(value === 1);
           } else if (number === BUTTON_START) {
-            console.log(`Start button (7): value=${value} electronProc=${!!electronProc} runningGame=${!!runningGame}`);
             if (value === 1 && !electronProc && !runningGame) {
-              console.log('Toggling Jarvis...');
-              execFile('curl', ['-s', '-X', 'POST', 'http://localhost:8895/toggle'], (err, stdout) => {
-                if (err) console.log('Jarvis toggle error:', err.message);
-                else console.log('Jarvis toggle response:', stdout);
-              });
+              execFile('curl', ['-s', '-X', 'POST', 'http://localhost:8895/toggle'], () => {});
             }
-          } else {
-            // Log unknown buttons so we can find Start's real number
-            if (value === 1) console.log(`Unknown button pressed: number=${number}`);
           }
         } else if (realType === JS_EVENT_AXIS && !isInit) {
           if (number === AXIS_LEFT_X) {

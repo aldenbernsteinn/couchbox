@@ -113,8 +113,18 @@ ipcMain.on('launch-heroic', (event, appId) => {
   const protonPath = path.join(os.homedir(), '.steam', 'steam', 'steamapps', 'common', 'Proton - Experimental');
   const prefixPath = path.join(os.homedir(), '.proton', 'hogwartslegacy');
 
-  const child = spawn(legendaryBin, [
-    'launch', appId, '--no-wine', '--wrapper', umuRun,
+  // Log to file since Electron's stdio is ignored by the listener
+  const logFile = '/tmp/patatin-heroic.log';
+  const logStream = fs.createWriteStream(logFile, { flags: 'a' });
+  logStream.write(`\n[${new Date().toISOString()}] Launching: ${legendaryBin} launch ${appId}\n`);
+  logStream.write(`  PROTONPATH=${protonPath}\n`);
+  logStream.write(`  STEAM_COMPAT_DATA_PATH=${prefixPath}\n`);
+
+  // Use shell wrapper to capture legendary output to log file
+  // (can't use pipes — Electron exits in 3s, pipes close, SIGPIPE kills legendary)
+  // --override-exe bypasses the launcher stub that checks for Epic Games Launcher
+  const child = spawn('/bin/bash', ['-c',
+    `"${legendaryBin}" launch "${appId}" --no-wine --wrapper "${umuRun}" --override-exe "Phoenix/Binaries/Win64/HogwartsLegacy.exe" >> "${logFile}" 2>&1`,
   ], {
     detached: true,
     stdio: 'ignore',
@@ -129,6 +139,7 @@ ipcMain.on('launch-heroic', (event, appId) => {
       PROTONPATH: protonPath,
       GAMEID: 'umu-990080',
       STORE: 'egs',
+      PROTON_LOG: '1',
     },
   });
   child.unref();

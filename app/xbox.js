@@ -286,11 +286,13 @@ function detectBackupGames() {
       let hero = null;
       let launcher = 'proton'; // default: direct Proton
       let epicAppId = null;
+      let exeName = null;
       if (gameName.includes('Hogwarts')) {
         art = 'https://cdn.cloudflare.steamstatic.com/steam/apps/990080/library_600x900.jpg';
         hero = 'https://cdn.cloudflare.steamstatic.com/steam/apps/990080/library_hero.jpg';
         launcher = 'heroic';
         epicAppId = 'fa4240e57a3c46b39f169041b7811293';
+        exeName = 'HogwartsLegacy.exe';
       } else if (gameName.toLowerCase().includes('rocket')) {
         art = 'https://cdn.cloudflare.steamstatic.com/steam/apps/252950/library_600x900.jpg';
         hero = 'https://cdn.cloudflare.steamstatic.com/steam/apps/252950/library_hero.jpg';
@@ -298,7 +300,7 @@ function detectBackupGames() {
 
       games.push({
         name: gameName, platform: 'backup', installed: true,
-        compatibility, launcher, epicAppId,
+        compatibility, launcher, epicAppId, exeName,
         art, hero, heroBlur: hero, logo: null,
         launch: mainExe,
         exe: mainExe,
@@ -711,6 +713,7 @@ async function doLaunchGame(game) {
   ipcRenderer.send('set-running-game', {
     name: game.name,
     appId: game.appId || null,
+    exeName: game.exeName || null,
     platform: game.platform,
     pid: null,
   });
