@@ -339,6 +339,90 @@ function isGameRunning() {
   try { process.kill(runningGame.pid, 0); return true; } catch { return false; }
 }
 
+// Continuous game-process auto-detection. Runs every 5s regardless of whether
+// the game was launched via the Patatin UI — catches direct Steam launches,
+// Heroic launches, Lutris, or any other path. When a game is detected here,
+// runningGame is set with __autoDetect: true so we can later tell our own
+// autodetect-flag apart from Electron-set state (don't clobber it).
+let autoGameDetectTimer = null;
+
+function autoDetectGame() {
+  // If Electron UI explicitly set a game with an appId, don't override it.
+  if (runningGame && runningGame.appId && !runningGame.__autoDetect) return;
+
+  // Steam games wrap every launch in `reaper SteamLaunch AppId=<id>`.
+  // This is the most reliable signal for Steam/Proton titles.
+  execFile('pgrep', ['-af', 'reaper SteamLaunch AppId='], { timeout: 2000 }, (err, stdout) => {
+    const line = (stdout || '').trim().split('\n')[0];
+    if (line) {
+      const parts = line.split(/\s+/);
+      const pid = parseInt(parts[0]);
+      const appIdMatch = line.match(/AppId=(\d+)/);
+      const appId = appIdMatch ? appIdMatch[1] : null;
+      if (pid && !isNaN(pid)) {
+        // Already tracking this PID? nothing to do.
+        if (runningGame && runningGame.pid === pid) return;
+        runningGame = {
+          name: `Steam game ${appId || '?'}`,
+          platform: 'steam',
+          appId,
+          pid,
+          __autoDetect: true,
+        };
+        writeGameState();
+        console.log(`[auto-detect] Steam game running — pid=${pid} appId=${appId}`);
+        // If mouse mode was active, shut it off NOW so it doesn't fight the game
+        if (mouseModeActive) {
+          console.log('[auto-detect] Killing mouse mode — game detected');
+          stopMouseMode();
+        }
+        return;
+      }
+    }
+
+    // Fallback: look for any non-steam wine/proton game running
+    execFile('pgrep', ['-f', 'Z:.*\\.exe|wine64.*\\.exe|heroic.*--game'], { timeout: 2000 }, (err2, stdout2) => {
+      const line2 = (stdout2 || '').trim().split('\n')[0];
+      if (line2) {
+        const pid = parseInt(line2);
+        if (pid && !isNaN(pid)) {
+          if (runningGame && runningGame.pid === pid) return;
+          runningGame = {
+            name: 'wine/proton game',
+            platform: 'wine',
+            pid,
+            __autoDetect: true,
+          };
+          writeGameState();
+          console.log(`[auto-detect] Wine/Proton game running — pid=${pid}`);
+          if (mouseModeActive) {
+            console.log('[auto-detect] Killing mouse mode — game detected');
+            stopMouseMode();
+          }
+          return;
+        }
+      }
+
+      // Nothing running now — if our auto-detect previously set a game, clear it.
+      if (runningGame && runningGame.__autoDetect) {
+        if (runningGame.pid) {
+          try { process.kill(runningGame.pid, 0); return; } catch {}
+        }
+        console.log('[auto-detect] Game exited — clearing state');
+        runningGame = null;
+        try { fs.unlinkSync(GAME_STATE_FILE); } catch {}
+      }
+    });
+  });
+}
+
+function startAutoGameDetect() {
+  if (autoGameDetectTimer) return;
+  // Run immediately at startup, then poll every 5 seconds
+  autoDetectGame();
+  autoGameDetectTimer = setInterval(autoDetectGame, 5000);
+}
+
 function findGameProcess() {
   // After Patatin exits (game launched), poll for game processes
   // Steam games: look for reaper processes with the appId
@@ -482,6 +566,8 @@ function resetIdleTimer() {
 
 function startMouseMode() {
   if (mouseModeActive) return;
+  // Never enter mouse mode while a game is running — controller belongs to the game
+  if (runningGame) return;
   mouseModeActive = true;
   stickX = 0;
   stickY = 0;
@@ -821,6 +907,15 @@ function launchPatatin(args = []) {
   electronProc.on('exit', () => {
     console.log('Patatin exited');
     electronProc = null;
+    // Reload game state from disk — Electron writes /tmp/patatin-game.json
+    // when xbox.js calls set-running-game IPC, but the listener never sees that IPC
+    try {
+      const state = JSON.parse(fs.readFileSync(GAME_STATE_FILE, 'utf8'));
+      if (state && state.name) {
+        runningGame = state;
+        console.log(`Game state loaded: ${state.name} (pid=${state.pid || 'pending'})`);
+      }
+    } catch {}
     if (runningGame && !runningGame.pid) {
       // Game was just launched — set up game environment
       setBlackDesktop();
@@ -907,13 +1002,13 @@ function openDevice(jsPath) {
         } else if (realType === JS_EVENT_AXIS && !isInit) {
           if (number === AXIS_LEFT_X) {
             stickX = value;
-            if (!mouseModeActive && !electronProc && Math.abs(value) > DEADZONE) {
+            if (!mouseModeActive && !electronProc && !runningGame && Math.abs(value) > DEADZONE) {
               startMouseMode();
             }
             if (mouseModeActive) resetIdleTimer();
           } else if (number === AXIS_LEFT_Y) {
             stickY = value;
-            if (!mouseModeActive && !electronProc && Math.abs(value) > DEADZONE) {
+            if (!mouseModeActive && !electronProc && !runningGame && Math.abs(value) > DEADZONE) {
               startMouseMode();
             }
             if (mouseModeActive) resetIdleTimer();
@@ -952,5 +1047,10 @@ setInterval(scan, 2000);
 
 // Reset cursor on startup in case a previous session left it big
 setCursor(CURSOR_THEME_NORMAL, CURSOR_SIZE_NORMAL);
+
+// Continuous game-process detection — catches Steam/Proton/Heroic/wine games
+// launched OUTSIDE of Patatin. Writes /tmp/patatin-game.json as the shared
+// signal that Jarvis (wakeword.py) and Patatin (mouse mode) both read.
+startAutoGameDetect();
 
 console.log('Patatin listener started. Press Xbox Guide to toggle UI. Joystick → mouse when hidden.');

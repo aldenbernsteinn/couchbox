@@ -106,25 +106,17 @@ ipcMain.on('close-youtube', () => closeYouTubeTV());
 ipcMain.on('launch-uri', (event, uri) => shell.openExternal(uri));
 
 ipcMain.on('launch-heroic', (event, appId) => {
-  // Launch via legendary CLI + umu (handles Epic auth, Proton, prefix setup)
+  // Launch via legendary + umu + GE-Proton with SteamAppId=990080 for Denuvo
+  // (Heroic --no-gui overrides SteamAppId to 0 and goes offline, so we call legendary directly)
   const legendaryBin = '/opt/Heroic/resources/app.asar.unpacked/build/bin/x64/linux/legendary';
   const legendaryConfig = path.join(os.homedir(), '.config', 'heroic', 'legendaryConfig', 'legendary');
   const umuRun = path.join(os.homedir(), '.config', 'heroic', 'tools', 'runtimes', 'umu', 'umu_run.py');
-  const protonPath = path.join(os.homedir(), '.steam', 'steam', 'steamapps', 'common', 'Proton - Experimental');
+  const protonPath = path.join(os.homedir(), '.steam', 'steam', 'compatibilitytools.d', 'GE-Proton10-34');
   const prefixPath = path.join(os.homedir(), '.proton', 'hogwartslegacy');
-
-  // Log to file since Electron's stdio is ignored by the listener
   const logFile = '/tmp/patatin-heroic.log';
-  const logStream = fs.createWriteStream(logFile, { flags: 'a' });
-  logStream.write(`\n[${new Date().toISOString()}] Launching: ${legendaryBin} launch ${appId}\n`);
-  logStream.write(`  PROTONPATH=${protonPath}\n`);
-  logStream.write(`  STEAM_COMPAT_DATA_PATH=${prefixPath}\n`);
 
-  // Use shell wrapper to capture legendary output to log file
-  // (can't use pipes — Electron exits in 3s, pipes close, SIGPIPE kills legendary)
-  // --override-exe bypasses the launcher stub that checks for Epic Games Launcher
   const child = spawn('/bin/bash', ['-c',
-    `"${legendaryBin}" launch "${appId}" --no-wine --wrapper "${umuRun}" --override-exe "Phoenix/Binaries/Win64/HogwartsLegacy.exe" >> "${logFile}" 2>&1`,
+    `"${legendaryBin}" launch "${appId}" --no-wine --wrapper "${umuRun}" --skip-version-check >> "${logFile}" 2>&1`,
   ], {
     detached: true,
     stdio: 'ignore',
@@ -133,12 +125,16 @@ ipcMain.on('launch-heroic', (event, appId) => {
       LEGENDARY_CONFIG_PATH: legendaryConfig,
       STEAM_COMPAT_DATA_PATH: prefixPath,
       STEAM_COMPAT_CLIENT_INSTALL_PATH: path.join(os.homedir(), '.steam', 'steam'),
+      WINEPREFIX: prefixPath,
+      PROTONPATH: protonPath,
       PROTON_ENABLE_NVAPI: '1',
       DXVK_ENABLE_NVAPI: '1',
       DXVK_NVAPI_ALLOW_OTHER_DRIVERS: '1',
-      PROTONPATH: protonPath,
       GAMEID: 'umu-990080',
       STORE: 'egs',
+      SteamAppId: '990080',
+      STEAM_COMPAT_APP_ID: '990080',
+      SteamGameId: 'umu-990080',
       PROTON_LOG: '1',
     },
   });
